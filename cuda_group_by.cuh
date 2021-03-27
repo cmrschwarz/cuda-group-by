@@ -92,9 +92,9 @@ kernel_fill_group_ht(gpu_data gd, int stream_count, int stream_idx)
         }
         else {
             size_t hash = group & GROUPS_MASK;
+            if (hash == 0) hash++; // skip the EMPTY_VALUE slot
             hte = &gd.group_table[hash];
             while (true) {
-                printf("searching %llu, found %llu \n", group, hte->group);
                 if (hte->group == group) break;
                 if (hte->group == GROUP_HT_EMPTY_VALUE) {
                     uint64_t found = atomicCAS(
@@ -103,26 +103,38 @@ kernel_fill_group_ht(gpu_data gd, int stream_count, int stream_idx)
                     if (found == GROUP_HT_EMPTY_VALUE) {
                         // atomicInc doesn't exist for 64 bit...
                         hte->output_idx =
-                            atomicAdd((cudaUInt64_t*)&groups_found, 1) + 1;
+                            atomicAdd((cudaUInt64_t*)&groups_found, 1);
+                        /*
+                        // DEBUG
+                        printf(
+                            "assigning index %llu to group %llu in ht slot "
+                            "%llu\n",
+                            hte->output_idx, hte->group, hte - gd.group_table);
+                        */
                         break;
                     }
                     if (found == group) break;
                 }
                 if (hte != &gd.group_table[GROUP_HT_SIZE - 1]) {
-                    hte = hte++;
+                    hte++;
                 }
                 else {
-                    hte = gd.group_table;
+                    // restart from the beginning of the hashtable,
+                    // skipping the EMPTY_VALUE in slot 0
+                    hte = &gd.group_table[1];
                 }
             }
         }
         atomicAdd((cudaUInt64_t*)&hte->aggregate, agg);
     }
 }
+template <int MAX_GROUP_BITS>
 __global__ void
 kernel_write_out_group_ht(gpu_data gd, int stream_count, int stream_idx)
 {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x +
+    constexpr size_t GROUP_HT_SIZE = ((size_t)1)
+                                     << (MAX_GROUP_BITS + GROUP_HT_SIZE_SHIFT);
+    int tid = threadIdx.x + blockIdx.x * blockDim.x +
               stream_idx * blockDim.x * gridDim.x;
     int stride = blockDim.x * gridDim.x * stream_count;
     if (tid == 0) {
@@ -139,11 +151,18 @@ kernel_write_out_group_ht(gpu_data gd, int stream_count, int stream_idx)
         }
         tid += stride;
     }
-    for (size_t i = tid; i < gd.input.row_count; i += stride) {
+    for (size_t i = tid; i < GROUP_HT_SIZE; i += stride) {
         group_ht_entry* hte = &gd.group_table[i];
         if (hte->group != GROUP_HT_EMPTY_VALUE) {
             gd.output.group_col[hte->output_idx] = hte->group;
             gd.output.aggregate_col[hte->output_idx] = hte->aggregate;
+            /*
+            // DEBUG
+            printf(
+                "writing out group %llu in index %llu\n", hte->group,
+                hte->output_idx);
+            */
+
             // reset for the next run
             hte->group = GROUP_HT_EMPTY_VALUE;
             hte->aggregate = 0;
@@ -192,8 +211,8 @@ void group_by_hashtable(
                 cudaStreamWaitEvent(stream, events[j], 0);
             }
         }
-        kernel_write_out_group_ht<<<block_size, grid_size, 0, stream>>>(
-            *gd, stream_count, i);
+        kernel_write_out_group_ht<MAX_GROUP_BITS>
+            <<<block_size, grid_size, 0, stream>>>(*gd, stream_count, i);
     }
     CUDA_TRY(cudaEventRecord(end_event));
     CUDA_TRY(cudaGetLastError());

@@ -8,12 +8,18 @@
 
 #define MAX_GROUPS 128
 
-#define BENCHMARK_MAX_STREAMS 8
+#define BENCHMARK_GROUP_VAL_MIN std::numeric_limits<uint64_t>::min()
+#define BENCHMARK_GROUP_VAL_MAX std::numeric_limits<uint64_t>::max()
+
 #define BENCHMARK_MIN_STREAMS 1
-#define BENCHMARK_ROWS_MIN 128
-#define BENCHMARK_ROWS_MAX 128
-#define BENCHMARK_GROUPS_MIN 2
-#define BENCHMARK_GROUPS_MAX 128
+#define BENCHMARK_MAX_STREAMS 8
+#define BENCHMARK_ROWS_MIN 1
+// 10**27 rows, 8 Byte per entry -> 1 GB per column
+#define BENCHMARK_ROWS_MAX (1 << 27)
+#define BENCHMARK_GROUPS_BITS_MIN 2
+#define BENCHMARK_GROUPS_BITS_MAX 7
+
+#define BENCHMARK_GROUPS_MAX (((size_t)1) << BENCHMARK_GROUPS_BITS_MAX)
 
 struct bench_data {
     union { // screw RAII
@@ -94,16 +100,17 @@ void free_bench_data(bench_data* bd)
 void setup_bench_data(bench_data* bd, size_t group_count, size_t row_count)
 {
     std::mt19937_64 generator{1337};
-    std::uniform_int_distribution<uint64_t> uint_rng{
-        std::numeric_limits<uint64_t>::min(),
-        std::numeric_limits<uint64_t>::max()};
-    std::uniform_int_distribution<uint64_t> group_rng{0, group_count};
+
+    std::uniform_int_distribution<uint64_t> uint_rng{BENCHMARK_GROUP_VAL_MIN,
+                                                     BENCHMARK_GROUP_VAL_MAX};
+
+    std::uniform_int_distribution<uint64_t> group_rng{0, group_count - 1};
 
     std::vector<uint64_t> groups{};
     groups.reserve(group_count);
 
-    // generate group_count different group values and initialize their sum
-    // to 0
+    // generate group_count different group values
+    // (duplicates just mean less groups, no big deal)
     bd->expected_output.clear();
     for (uint64_t i = 0; i < group_count; i++) {
         groups.push_back(uint_rng(generator));
@@ -142,8 +149,10 @@ bool validate(bench_data* bd)
         uint64_t got = bd->output_cpu.aggregate_col[i];
         if (expected == bd->expected_output.end()) {
             fprintf(
-                stderr, "validation failiure: found unexpected group %llu\n",
-                group);
+                stderr,
+                "validation failiure: found unexpected group %llu in output "
+                "index %llu\n",
+                group, i);
             return false;
         }
         else if (expected->second != got) {
@@ -165,9 +174,9 @@ bool validate(bench_data* bd)
 
 void run_benchmarks(bench_data* bd)
 {
-    setup_bench_data(bd, 1 << 7, 1);
-    group_by_hashtable<7>(
-        &bd->data_gpu, 128, 16, 4, bd->streams, bd->events, bd->start_event,
+    setup_bench_data(bd, BENCHMARK_GROUPS_MAX, BENCHMARK_ROWS_MAX);
+    group_by_hashtable<BENCHMARK_GROUPS_BITS_MAX>(
+        &bd->data_gpu, 128, 1, 1, bd->streams, bd->events, bd->start_event,
         bd->end_event);
     float time;
     CUDA_TRY(cudaEventElapsedTime(&time, bd->start_event, bd->end_event));
