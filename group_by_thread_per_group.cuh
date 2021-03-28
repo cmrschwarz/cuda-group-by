@@ -36,8 +36,8 @@ static inline bool approach_thread_per_group_available(
     int group_bits, int row_count, int grid_size, int block_size,
     int stream_count)
 {
-    if (group_bits != 10 || row_count != 65536 || grid_size != 64 ||
-        block_size != 128 || stream_count != 4)
+    if (group_bits != 10 || row_count != 65536 || grid_size != 1024 ||
+        block_size != 1024 || stream_count != 0)
         return false;
     if (TPG_DEBUG_ONCE) return false;
     const size_t group_count = (1 << group_bits);
@@ -147,16 +147,18 @@ __global__ void kernel_thread_per_group_more_groups(
                 continue;
             }
             // one thread gets assigned the newly found group
-            if (groups_found % blockDim.x == threadIdx.x) {
+            bool responsible = (groups_found % blockDim.x == threadIdx.x);
+            __syncthreads();
+            if (responsible) {
                 thread_groups[groups_in_thread] = group;
                 thread_aggregates[groups_in_thread] = aggregates[i];
                 if (group == TPG_EMPTY_GROUP_VALUE) {
                     empty_group_slot = groups_in_thread;
                 }
-                printf(
-                    "found group %llu: (%i %i %i) [gf: %i]\n",
-                    thread_groups[groups_in_thread], threadIdx.x, blockIdx.x,
-                    stream_idx, groups_found);
+                /* printf(
+                     "found group %llu: (%i %i %i) [gf: %i]\n",
+                     thread_groups[groups_in_thread], threadIdx.x, blockIdx.x,
+                     stream_idx, groups_found);*/
                 groups_in_thread++;
                 groups_found++;
             }
@@ -177,9 +179,10 @@ __global__ void kernel_thread_per_group_more_groups(
         // again, max one thread can get here, so no race
         groups_found--;
     }
-    __syncthreads();
     for (int i = 0; i < MAX_GROUPS; i++) {
+        __syncthreads();
         if (groups_found == 0) break;
+        __syncthreads();
         // the hope is that with this loop ordering the global memory reads
         // will be somwhat broadcasted
         // maybe investigate __shared__ here??
@@ -210,16 +213,17 @@ __global__ void kernel_thread_per_group_more_groups(
                     groups_in_thread--;
                     groups_found--;
                     atomicAdd((cudaUInt64_t*)&tpg_group_count, 1);
-                    printf(
+                    /*printf(
                         "added group %llu: (%i %i %i) [out idx: %i, gf: %i]\n",
                         thread_groups[last_group_idx], threadIdx.x, blockIdx.x,
-                        stream_idx, i, groups_found);
+                        stream_idx, i, groups_found);*/
                 }
                 else {
-                    /*  printf(
-                          "failed to add group %llu: (%i %i %i) <%llu won> [out
-                       idx: %i]\n", thread_groups[last_group_idx], threadIdx.x,
-                       blockIdx.x, stream_idx, group, i);*/
+                    /* printf(
+                         "failed to add group %llu: (%i %i %i) <%llu won> [out "
+                         "idx: %i]\n",
+                         thread_groups[last_group_idx], threadIdx.x, blockIdx.x,
+                         stream_idx, group, i);*/
                 }
             }
             __syncthreads();
@@ -230,14 +234,12 @@ __global__ void kernel_thread_per_group_more_groups(
                 if (threadIdx.x == 0) {
                     race_won = false;
                 }
-                __syncthreads();
                 continue;
             }
             // only the thread that did the cas correctly updated it's
             // group variable, so we need to bring the others up to speed
             group = output.group_col[i];
         }
-        bool added = false;
         for (int j = 0; j < groups_in_thread; j++) {
             if (thread_groups[j] == group) {
                 atomicAdd(
@@ -255,22 +257,20 @@ __global__ void kernel_thread_per_group_more_groups(
                 // again, debatable whether or not we should break here
                 // definitely no need for j-- here though, since the other
                 // groups cannot match on this i
-                printf(
-                    "increased group %llu: (%i %i %i) [out idx: %i, gf: %i, "
-                    "git: %i]\n",
-                    group, threadIdx.x, blockIdx.x, stream_idx, i, groups_found,
-                    groups_in_thread);
-                added = true;
+                /* printf(
+                     "increased group %llu: (%i %i %i) [out idx: %i, gf: %i, "
+                     "git: %i]\n",
+                     group, threadIdx.x, blockIdx.x, stream_idx, i,
+                   groups_found, groups_in_thread);*/
             }
         }
-        if (added)
-            printf("exit  (%i %i %i)\n", threadIdx.x, blockIdx.x, stream_idx);
         // so groups_found in the next iteration is not racing
         // again, is this correct???
         // also, is it even worth the optimization that we get from
         // the early exit for groups_found=0 ?
         __syncthreads();
     }
+    __syncthreads();
     if (groups_found != 0)
         printf(
             "error: (%i %i %i) [gf: %i]\n", threadIdx.x, blockIdx.x, stream_idx,
@@ -351,7 +351,7 @@ void group_by_thread_per_group(
             actual_stream_count, i);
     }
     kernel_thread_per_group_insert_empty_group<<<1, 1>>>(gd->output);
-    TPG_DEBUG_ONCE = true;
+    // TPG_DEBUG_ONCE = true;
     // TODO: insert the empty group on the gpu side because that's what
     // we actually want to measure
     CUDA_TRY(cudaDeviceSynchronize());
