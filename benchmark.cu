@@ -2,7 +2,9 @@
 #include <vector>
 #include <random>
 #include <limits>
-
+#include <iostream>
+#include <fstream>
+#include <iomanip>
 #include "utils.h"
 #include "cuda_group_by.cuh"
 
@@ -56,13 +58,21 @@ const int benchmark_gpu_grid_dim_variants[] = {1, 64, 1024};
 #define BENCHMARK_GPU_GRID_DIM_VARIANT_COUNT                                   \
     ARRAY_SIZE(benchmark_gpu_grid_dim_variants)
 
+#if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
+#else
+#define BENCHMARK_GROUP_BITS_MAX 10
+#endif
+
 #define BENCHMARK_GROUPS_MAX (1 << BENCHMARK_GROUP_BITS_MAX)
 
 struct bench_data {
-    union { // disable RAII
+    union { // anonymous unions to disable RAII
         std::unordered_map<uint64_t, uint64_t>
             expected_output[BENCHMARK_ROW_COUNT_VARIANT_COUNT];
+    };
+    union {
+        std::ofstream output_csv;
     };
 
     db_table input_cpu;
@@ -240,6 +250,21 @@ bool validate(bench_data* bd, int row_count_variant)
     return true;
 }
 
+void record_time_and_validate(
+    bench_data* bd, int group_count, int row_count_variant, int grid_dim,
+    int block_dim, int stream_count, const char* approach_name)
+{
+    float time;
+    CUDA_TRY(cudaEventElapsedTime(&time, bd->start_event, bd->end_event));
+    RELASE_ASSERT(validate(bd, row_count_variant));
+    // the flush on std::endl is intentional to allow for tail -f style
+    // status inspections
+    bd->output_csv << approach_name << ";" << group_count << ";"
+                   << benchmark_row_count_variants[row_count_variant] << ";"
+                   << grid_dim << ";" << block_dim << ";" << stream_count << ";"
+                   << time << std::endl;
+}
+
 template <int GROUP_BIT_COUNT>
 void run_benchmarks_for_group_bit_count(bench_data* bd)
 {
@@ -257,19 +282,13 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                 for (int scv = 0; scv < BENCHMARK_STREAM_COUNT_VARIANT_COUNT;
                      scv++) {
                     int stream_count = benchmark_stream_count_variants[scv];
-                    assert(GROUP_BIT_COUNT <= BENCHMARK_GROUP_BITS_MAX);
                     group_by_hashtable<GROUP_BIT_COUNT>(
                         &bd->data_gpu, grid_dim, block_dim, stream_count,
                         bd->streams, bd->events, bd->start_event,
                         bd->end_event);
-                    float time;
-                    CUDA_TRY(cudaEventElapsedTime(
-                        &time, bd->start_event, bd->end_event));
-                    /*printf(
-                        "elapsed: %f, creating %llu groups out of %llu rows\n",
-                        time, bd->output_cpu.row_count,
-                        bd->input_cpu.row_count);*/
-                    RELASE_ASSERT(validate(bd, rcv));
+                    record_time_and_validate(
+                        bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
+                        stream_count, "hashtable");
                 }
             }
         }
@@ -280,12 +299,20 @@ int main()
 {
     bench_data bench_data;
     alloc_bench_data(&bench_data);
+    new (&bench_data.output_csv) std::ofstream{"bench.csv"};
+    bench_data.output_csv
+        << "approach;groups;rows;grid dim;block dim;stream count;time in ms\n";
+    bench_data.output_csv << std::fixed << std::setprecision(20);
     run_benchmarks_for_group_bit_count<1>(&bench_data);
-    run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<4>(&bench_data);
+    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
+#if BIG_DATA
+    run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<16>(&bench_data);
-    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
+#endif
+    bench_data.output_csv.flush();
+    bench_data.output_csv.~basic_ofstream();
     free_bench_data(&bench_data);
     return 0;
 }
