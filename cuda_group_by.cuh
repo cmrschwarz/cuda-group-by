@@ -186,16 +186,19 @@ void group_by_hashtable(
 {
     constexpr size_t MAX_GROUPS = 1 << MAX_GROUP_BITS;
     // reset number of groups found
+    CUDA_TRY(cudaEventRecord(start_event));
     size_t zero = 0;
     cudaMemcpyToSymbol(
         groups_found, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);
-
-    CUDA_TRY(cudaEventRecord(start_event));
-    for (int i = 0; i < stream_count; i++) {
-        cudaStream_t stream = (stream_count > 1) ? streams[i] : 0;
+    // for stream_count 0 we use the default stream,
+    // but thats actually still one stream not zero
+    int actual_stream_count = stream_count ? stream_count : 1;
+    for (int i = 0; i < actual_stream_count; i++) {
+        cudaStream_t stream = stream_count ? streams[i] : 0;
         kernel_fill_group_ht<MAX_GROUP_BITS>
-            <<<block_size, grid_size, 0, stream>>>(*gd, stream_count, i);
-        if (stream) cudaEventRecord(events[i], stream);
+            <<<block_size, grid_size, 0, stream>>>(*gd, actual_stream_count, i);
+        // if we have only one stream there is no need for waiting events
+        if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
     // since it's likely that our block / grid dims are overkill
     // for the write out kernel we reduce them a bit
@@ -203,16 +206,18 @@ void group_by_hashtable(
         grid_size = MAX_GROUPS / (stream_count * block_size);
         if (!grid_size) grid_size = 1;
     }
-    for (int i = 0; i < stream_count; i++) {
-        cudaStream_t stream = (stream_count > 1) ? streams[i] : 0;
-        if (stream) {
+    for (int i = 0; i < actual_stream_count; i++) {
+        cudaStream_t stream = stream_count ? streams[i] : 0;
+        if (stream_count > 1) {
             // every write out kernel needs to wait on every fill kernel
             for (int j = 0; j < stream_count; j++) {
+                // the stream doesn't need to wait on itself
+                if (j == i) continue;
                 cudaStreamWaitEvent(stream, events[j], 0);
             }
         }
         kernel_write_out_group_ht<MAX_GROUP_BITS>
-            <<<block_size, grid_size, 0, stream>>>(*gd, stream_count, i);
+            <<<block_size, grid_size, 0, stream>>>(*gd, actual_stream_count, i);
     }
     CUDA_TRY(cudaEventRecord(end_event));
     CUDA_TRY(cudaGetLastError());

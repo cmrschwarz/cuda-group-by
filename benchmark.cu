@@ -16,11 +16,11 @@
 
 #if BIG_DATA
 #define BENCHMARK_STREAMS_MAX 16
-const size_t benchmark_stream_count_variants[] = {1, 2, 4, 8,
-                                                  BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, 1, 2,
+                                                  4, 8, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {1, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, 1, BENCHMARK_STREAMS_MAX};
 #endif
 
 #define BENCHMARK_STREAM_COUNT_VARIANT_COUNT                                   \
