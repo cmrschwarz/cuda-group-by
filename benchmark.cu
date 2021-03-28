@@ -5,8 +5,9 @@
 #include <iostream>
 #include <fstream>
 #include <iomanip>
-#include "utils.h"
-#include "cuda_group_by.cuh"
+
+#include "group_by_hashtable.cuh"
+#include "group_by_thread_per_group.cuh"
 
 // set to false to reduce data size for debugging
 #define BIG_DATA false
@@ -23,9 +24,6 @@ const size_t benchmark_stream_count_variants[] = {0, 1, 2,
 const size_t benchmark_stream_count_variants[] = {0, 1, BENCHMARK_STREAMS_MAX};
 #endif
 
-#define BENCHMARK_STREAM_COUNT_VARIANT_COUNT                                   \
-    ARRAY_SIZE(benchmark_stream_count_variants)
-
 #if BIG_DATA
 // 2^27, 8 Byte per entry -> 1 GiB per stored column
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
@@ -36,27 +34,17 @@ const size_t benchmark_row_count_variants[] = {
 const size_t benchmark_row_count_variants[] = {2, 32, 128, BENCHMARK_ROWS_MAX};
 #endif
 
-#define BENCHMARK_ROW_COUNT_VARIANT_COUNT                                      \
-    ARRAY_SIZE(benchmark_row_count_variants)
-
 #if BIG_DATA
-const int benchmark_gpu_block_dim_variants[] = {4,   16,  32,  64,
-                                                128, 256, 512, 1024};
+const int benchmark_gpu_block_dim_variants[] = {32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {4, 128, 1024};
+const int benchmark_gpu_block_dim_variants[] = {32, 128, 1024};
 #endif
-
-#define BENCHMARK_GPU_BLOCK_DIM_VARIANT_COUNT                                  \
-    ARRAY_SIZE(benchmark_gpu_block_dim_variants)
 
 #if BIG_DATA
 const int benchmark_gpu_grid_dim_variants[] = {1, 8, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {1, 64, 1024};
+const int benchmark_gpu_grid_dim_variants[] = {64, 1024};
 #endif
-
-#define BENCHMARK_GPU_GRID_DIM_VARIANT_COUNT                                   \
-    ARRAY_SIZE(benchmark_gpu_grid_dim_variants)
 
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
@@ -64,7 +52,16 @@ const int benchmark_gpu_grid_dim_variants[] = {1, 64, 1024};
 #define BENCHMARK_GROUP_BITS_MAX 10
 #endif
 
-#define BENCHMARK_GROUPS_MAX (1 << BENCHMARK_GROUP_BITS_MAX)
+#define BENCHMARK_GROUPS_MAX ((size_t)1 << BENCHMARK_GROUP_BITS_MAX)
+
+#define BENCHMARK_GPU_GRID_DIM_VARIANT_COUNT                                   \
+    ARRAY_SIZE(benchmark_gpu_grid_dim_variants)
+#define BENCHMARK_GPU_BLOCK_DIM_VARIANT_COUNT                                  \
+    ARRAY_SIZE(benchmark_gpu_block_dim_variants)
+#define BENCHMARK_ROW_COUNT_VARIANT_COUNT                                      \
+    ARRAY_SIZE(benchmark_row_count_variants)
+#define BENCHMARK_STREAM_COUNT_VARIANT_COUNT                                   \
+    ARRAY_SIZE(benchmark_stream_count_variants)
 
 struct bench_data {
     union { // anonymous unions to disable RAII
