@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdio>
 #include <cstdlib>
+#include <cassert>
 
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 

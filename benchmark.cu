@@ -125,10 +125,15 @@ void alloc_bench_data(bench_data* bd)
     CUDA_TRY(cudaEventCreate(&bd->end_event));
 
     gpu_data_alloc(&bd->data_gpu, BENCHMARK_ROWS_MAX, BENCHMARK_GROUPS_MAX);
+    group_by_hashtable_init(BENCHMARK_ROWS_MAX);
+    group_by_thread_per_group_init();
 }
 
 void free_bench_data(bench_data* bd)
 {
+    group_by_thread_per_group_fin();
+    group_by_hashtable_fin();
+
     gpu_data_free(&bd->data_gpu);
 
     CUDA_TRY(cudaEventDestroy(bd->end_event));
