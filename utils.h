@@ -1,4 +1,7 @@
 #pragma once
+
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+
 #define CUDA_TRY(expr)                                                         \
     do {                                                                       \
         cudaError_t _err_ = (expr);                                            \
@@ -10,7 +13,7 @@
 #define RELASE_ASSERT(expr)                                                    \
     if (!(expr)) do {                                                          \
             fprintf(                                                           \
-                stderr, "%s:%s: assertion failed: '%s'\n", __FILE__, __LINE__, \
+                stderr, "%s:%i: assertion failed: '%s'\n", __FILE__, __LINE__, \
                 #expr);                                                        \
             exit(1);                                                           \
     } while (0)

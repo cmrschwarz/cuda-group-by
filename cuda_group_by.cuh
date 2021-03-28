@@ -180,7 +180,7 @@ template <int MAX_GROUP_BITS> void group_by_thread_per_group()
 
 template <int MAX_GROUP_BITS>
 void group_by_hashtable(
-    gpu_data* gd, int block_size, int grid_size, int stream_count,
+    gpu_data* gd, int grid_size, int block_size, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
