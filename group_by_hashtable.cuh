@@ -159,7 +159,7 @@ void group_by_hashtable(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         kernel_fill_group_ht<MAX_GROUP_BITS>
-            <<<block_size, grid_size, 0, stream>>>(
+            <<<grid_size, block_size, 0, stream>>>(
                 gd->input, group_ht, actual_stream_count, i);
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
@@ -181,7 +181,7 @@ void group_by_hashtable(
             }
         }
         kernel_write_out_group_ht<MAX_GROUP_BITS>
-            <<<block_size, grid_size, 0, stream>>>(
+            <<<grid_size, block_size, 0, stream>>>(
                 gd->output, group_ht, actual_stream_count, i);
     }
     CUDA_TRY(cudaEventRecord(end_event));

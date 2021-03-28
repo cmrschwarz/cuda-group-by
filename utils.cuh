@@ -18,6 +18,7 @@
             fprintf(                                                           \
                 stderr, "%s:%i: assertion failed: '%s'\n", __FILE__, __LINE__, \
                 #expr);                                                        \
+            __builtin_trap();                                                  \
             exit(1);                                                           \
     } while (0)
 
@@ -27,5 +28,6 @@ static inline void report_cuda_error(
     fprintf(
         stderr, "CUDA Error at %s:%i%s%s\n%s\n", file, line, cmd ? ": " : "",
         cmd ? cmd : "", cudaGetErrorString(err));
+    __builtin_trap();
     if (die) exit(EXIT_FAILURE);
 }
