@@ -36,10 +36,14 @@ static inline bool approach_thread_per_group_available(
     int group_bits, int row_count, int grid_size, int block_size,
     int stream_count)
 {
+    /*
+    //DEBUG
     if (group_bits != 10 || row_count != 65536 || grid_size != 1024 ||
-        block_size != 1024 || stream_count != 0)
-        return false;
+           block_size != 1024 || stream_count != 0)
+           return false;
     if (TPG_DEBUG_ONCE) return false;
+    */
+
     const size_t group_count = (1 << group_bits);
     if (group_count > TPG_MAX_GROUPS) return false;
     if (group_count < block_size) return false;
@@ -75,6 +79,7 @@ __global__ void kernel_thread_per_group_more_groups(
     __shared__ int rows_read;
     __shared__ bool row_consumed;
     __shared__ bool race_won;
+    __shared__ uint64_t curr_group;
 
     size_t base_idx =
         (size_t)blockIdx.x * blockDim.x + stream_idx * blockDim.x * gridDim.x;
@@ -182,11 +187,11 @@ __global__ void kernel_thread_per_group_more_groups(
     for (int i = 0; i < MAX_GROUPS; i++) {
         __syncthreads();
         if (groups_found == 0) break;
+        if (threadIdx.x == 0) {
+            curr_group = output.group_col[i];
+        }
         __syncthreads();
-        // the hope is that with this loop ordering the global memory reads
-        // will be somwhat broadcasted
-        // maybe investigate __shared__ here??
-        uint64_t group = output.group_col[i];
+        uint64_t group = curr_group;
         // if the empty group occurs
         // we can be assured that this will happen at some point
         // since we have MAX_GROUPS slots but only insert MAX_GROUPS-1
@@ -213,10 +218,10 @@ __global__ void kernel_thread_per_group_more_groups(
                     groups_in_thread--;
                     groups_found--;
                     atomicAdd((cudaUInt64_t*)&tpg_group_count, 1);
-                    /*printf(
-                        "added group %llu: (%i %i %i) [out idx: %i, gf: %i]\n",
-                        thread_groups[last_group_idx], threadIdx.x, blockIdx.x,
-                        stream_idx, i, groups_found);*/
+                    /*  printf(
+                          "added group %llu: (%i %i %i) [out idx: %i, gf:
+                       %i]\n", thread_groups[last_group_idx], threadIdx.x,
+                       blockIdx.x, stream_idx, i, groups_found);*/
                 }
                 else {
                     /* printf(
@@ -236,9 +241,13 @@ __global__ void kernel_thread_per_group_more_groups(
                 }
                 continue;
             }
-            // only the thread that did the cas correctly updated it's
-            // group variable, so we need to bring the others up to speed
-            group = output.group_col[i];
+            else {
+                if (threadIdx.x == 0) {
+                    curr_group = output.group_col[i];
+                }
+                __syncthreads();
+                group = curr_group;
+            }
         }
         for (int j = 0; j < groups_in_thread; j++) {
             if (thread_groups[j] == group) {
@@ -257,11 +266,11 @@ __global__ void kernel_thread_per_group_more_groups(
                 // again, debatable whether or not we should break here
                 // definitely no need for j-- here though, since the other
                 // groups cannot match on this i
-                /* printf(
-                     "increased group %llu: (%i %i %i) [out idx: %i, gf: %i, "
-                     "git: %i]\n",
-                     group, threadIdx.x, blockIdx.x, stream_idx, i,
-                   groups_found, groups_in_thread);*/
+                /*printf(
+                    "increased group %llu: (%i %i %i) [out idx: %i, gf: %i, "
+                    "git: %i]\n",
+                    group, threadIdx.x, blockIdx.x, stream_idx, i, groups_found,
+                    groups_in_thread);*/
             }
         }
         // so groups_found in the next iteration is not racing
@@ -271,10 +280,12 @@ __global__ void kernel_thread_per_group_more_groups(
         __syncthreads();
     }
     __syncthreads();
-    if (groups_found != 0)
+    if (groups_found != 0) {
         printf(
             "error: (%i %i %i) [gf: %i]\n", threadIdx.x, blockIdx.x, stream_idx,
             groups_found);
+        assert(false);
+    }
 }
 
 __global__ void kernel_thread_per_group_insert_empty_group(db_table output)
@@ -338,12 +349,14 @@ void group_by_thread_per_group(
     // same reasoning as in hashtable_init
     assert(TPG_EMPTY_GROUP_VALUE == 0);
     uint64_t zero = 0;
+
     CUDA_TRY(cudaMemcpyToSymbol(
         tpg_group_count, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice));
     CUDA_TRY(
         cudaMemset(gd->output.group_col, 0, MAX_GROUPS * sizeof(uint64_t)));
     CUDA_TRY(
         cudaMemset(gd->output.aggregate_col, 0, MAX_GROUPS * sizeof(uint64_t)));
+    CUDA_TRY(cudaEventRecord(start_event));
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         group_based_kernel_dispatch<MAX_GROUPS>::call(
@@ -354,10 +367,10 @@ void group_by_thread_per_group(
     // TPG_DEBUG_ONCE = true;
     // TODO: insert the empty group on the gpu side because that's what
     // we actually want to measure
-    CUDA_TRY(cudaDeviceSynchronize());
     cudaMemcpyFromSymbol(
         &gd->output.row_count, tpg_group_count, sizeof(size_t), 0,
         cudaMemcpyDeviceToHost);
-    //  TPG_DEBUG_ONCE = true;
+    CUDA_TRY(cudaEventRecord(end_event));
     CUDA_TRY(cudaGetLastError());
+    //  TPG_DEBUG_ONCE = true;
 }

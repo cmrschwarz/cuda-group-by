@@ -10,7 +10,7 @@
 #include "group_by_thread_per_group.cuh"
 
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 
 #if BIG_DATA
 #define BENCHMARK_STREAMS_MAX 16
@@ -261,6 +261,7 @@ void record_time_and_validate(
     bench_data* bd, int group_count, int row_count_variant, int grid_dim,
     int block_dim, int stream_count, const char* approach_name)
 {
+    CUDA_TRY(cudaEventSynchronize(bd->end_event));
     float time;
     CUDA_TRY(cudaEventElapsedTime(&time, bd->start_event, bd->end_event));
     RELASE_ASSERT(validate(bd, row_count_variant));
@@ -285,7 +286,7 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
             int grid_dim = benchmark_gpu_grid_dim_variants[gdv];
             for (int bdv = 0; bdv < BENCHMARK_GPU_BLOCK_DIM_VARIANT_COUNT;
                  bdv++) {
-                int block_dim = benchmark_gpu_block_dim_variants[gdv];
+                int block_dim = benchmark_gpu_block_dim_variants[bdv];
                 for (int scv = 0; scv < BENCHMARK_STREAM_COUNT_VARIANT_COUNT;
                      scv++) {
                     int stream_count = benchmark_stream_count_variants[scv];
