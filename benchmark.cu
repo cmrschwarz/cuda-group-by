@@ -18,7 +18,7 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 
 #if BIG_DATA
 #define BENCHMARK_STREAMS_MAX 16
@@ -310,13 +310,20 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                     if (approach_hashtable_available(
                             GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
                             stream_count)) {
+                        group_by_hashtable<GROUP_BIT_COUNT, true>(
+                            &bd->data_gpu, grid_dim, block_dim, stream_count,
+                            bd->streams, bd->events, bd->start_event,
+                            bd->end_event);
+                        record_time_and_validate(
+                            bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
+                            stream_count, "hashtable_eager_out_idx");
                         group_by_hashtable<GROUP_BIT_COUNT, false>(
                             &bd->data_gpu, grid_dim, block_dim, stream_count,
                             bd->streams, bd->events, bd->start_event,
                             bd->end_event);
                         record_time_and_validate(
                             bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
-                            stream_count, "hashtable");
+                            stream_count, "hashtable_lazy_out_idx");
                     }
 #endif
 #if ENABLE_APPROACH_THREAD_PER_GROUP

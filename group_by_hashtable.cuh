@@ -181,8 +181,16 @@ void group_by_hashtable(
     cudaEvent_t end_event)
 {
     constexpr size_t MAX_GROUPS = 1 << MAX_GROUP_BITS;
-    // reset number of groups found
+    // clear the hashtable.
+    // this is only necessary since we share the memory
+    // for the two different template instantiations
+    // therefore its not counted towards the runtime
+    cudaMemset(
+        group_ht, 0,
+        (1 << (MAX_GROUP_BITS + GROUP_HT_SIZE_SHIFT)) *
+            sizeof(group_ht_entry<true>));
     CUDA_TRY(cudaEventRecord(start_event));
+    // reset number of groups found
     size_t zero = 0;
     cudaMemcpyToSymbol(
         group_ht_groups_found, &zero, sizeof(zero), 0, cudaMemcpyHostToDevice);

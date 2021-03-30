@@ -22,10 +22,14 @@ COLUMN_COUNT = 8
 #coloring options
 approach_colors = {
     "hashtable": "darkorange",
+    "hashtable_eager_out_idx": "lightblue",
+    "hashtable_lazy_out_idx": "green",
     "thread_per_group": "deepskyblue"
 }
 approach_markers = {
     "hashtable": "^",
+    "hashtable_eager_out_idx": "+",
+    "hashtable_lazy_out_idx": "*",
     "thread_per_group": "x"
 }
 
