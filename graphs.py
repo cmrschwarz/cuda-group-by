@@ -176,6 +176,55 @@ def throughput_over_stream_count(data, group_count):
     ax.legend()
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
+
+def throughput_over_group_size_barring_row_count(data):
+    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    ax.set_xlabel("group count")
+    ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+    ax.set_title(f"Throughput over Group Count, best in class")
+    by_group_count = classify(data, GROUP_COUNT_COL)
+    bar_width = 1.0 / (len(by_group_count) + 1)
+    bar_gap = 0.07
+    by_approaches = classify(data, APPROACH_COL)
+    for ap_id, (ap, ap_rows) in enumerate(by_approaches.items()):
+        prev_y_vals = None
+        by_row_count = sorted(classify(ap_rows, ROW_COUNT_COL).items())
+        rowcounts = [kv[0] for kv in by_row_count]
+        rowcounts_str = f"{{{', '.join([str(rc) for rc in rowcounts])}}}"
+        for (rc, rc_rows) in by_row_count:
+            by_group_count = classify(rc_rows, GROUP_COUNT_COL)
+            # fixed approach, row count and group count
+            # averaged iterations
+            # --> best in class over grid dim, block dim and stream count  
+
+            best_in_class = sort_by_col(
+                highest_in_class(by_group_count, THROUGHPUT_COL).values(), 
+                GROUP_COUNT_COL
+            )
+            y_vals = col_vals(best_in_class,THROUGHPUT_COL)
+            y_bar_vals = list(y_vals)
+            if prev_y_vals is not None:
+                for i in range(0, len(prev_y_vals)):
+                    y_bar_vals[i] -= prev_y_vals[i] * (1 + bar_gap)
+            x_positions = [
+                i + (ap_id - len(by_group_count) / 2. + 1) * bar_width 
+                for i in range(0, len(y_vals))
+            ]
+            
+            ax.bar(
+                x_positions, y_bar_vals, bar_width, 
+                label = f"{ap}, row counts={rowcounts_str}" if prev_y_vals is None else None,
+                bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals is not None else 0,
+                color=approach_colors[ap]
+            )
+            ax.set_xticks(range(0, len(x_positions)))
+            ax.set_xticklabels(col_vals(best_in_class, GROUP_COUNT_COL))
+            prev_y_vals = y_vals
+    ax.legend()
+    ax.set_yscale("log")
+    plt.savefig(f"throughput_over_group_size_barring_row_count.png")
+
+
 def read_csv(path):
     data=[]
     with open(path) as file:
@@ -219,6 +268,7 @@ def main():
     os.chdir(output_path)
     throughput_over_group_count(data)
     throughput_over_stream_count(data, 32)
+    throughput_over_group_size_barring_row_count(data)
 
 if __name__ == "__main__":
     main()

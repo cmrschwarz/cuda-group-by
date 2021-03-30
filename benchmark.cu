@@ -40,8 +40,8 @@ const size_t benchmark_stream_count_variants[] = {0, 2, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     2, 4, 16, 32, 128, 1024, 16384, BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 17)
-const size_t benchmark_row_count_variants[] = {128, BENCHMARK_ROWS_MAX};
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
+const size_t benchmark_row_count_variants[] = {128, 1024, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
