@@ -15,9 +15,12 @@ ROW_COUNT_COL = 2
 GRID_DIM_COL = 3
 BLOCK_DIM_COL = 4
 STREAM_COUNT_COL = 5
-TIME_MS_COL = 6
-THROUGHPUT_COL = 7
-COLUMN_COUNT = 8
+ITERATION_COL = 6
+TIME_MS_COL = 7
+THROUGHPUT_COL = 8
+COLUMN_COUNT = 9
+
+COLUMNS = list(range(0, COLUMN_COUNT))
 
 #coloring options
 approach_colors = {
@@ -73,13 +76,31 @@ def lowest_in_class(classes, minimize_col):
         lowest[k] = min(v, key=lambda r: r[minimize_col]) 
     return lowest
 
+def col_vals_l(rows, col):
+    return map(lambda r: r[col], rows)
+
 def col_vals(rows, col):
-    return list(map(lambda r: r[col], rows))
+    return list(col_vals_l(rows, col))
+
+def col_average(rows, col):
+    return sum(col_vals_l(rows, col)) / len(rows)
+
+def average_col(rows, col):
+    class_cols = list(COLUMNS)
+    class_cols.remove(col)
+    output_rows = []
+    for row_group in classify_mult(rows, class_cols).values():
+        row = row_group[0]
+        row[col] = col_average(row_group, col)
+        output_rows.append(row)
+    return output_rows
+
+
 
 def class_with_highest_average(classes, avg_col):
     return max(
         classes.items(), 
-        key=lambda kv: sum(map(lambda r: r[avg_col], kv[1]))
+        key=lambda kv: col_average(kv[1], avg_col)
     )[0]
 
 def sort_by_col(rows, sort_col):
@@ -168,6 +189,7 @@ def read_csv(path):
             data_row[GRID_DIM_COL] = (int(csv_row[GRID_DIM_COL]))
             data_row[BLOCK_DIM_COL] = (int(csv_row[BLOCK_DIM_COL]))
             data_row[STREAM_COUNT_COL] = (int(csv_row[STREAM_COUNT_COL]))
+            data_row[ITERATION_COL] = (int(csv_row[ITERATION_COL]))
             data_row[TIME_MS_COL] = (float(csv_row[TIME_MS_COL]))
             data_row[THROUGHPUT_COL] = (1000. * DB_ROW_SIZE_BYTES * data_row[ROW_COUNT_COL]) / data_row[TIME_MS_COL] / 2**30
             data.append(data_row)
@@ -189,6 +211,9 @@ def main():
     
     #read in data
     data = read_csv(input_path)
+
+    # average runs since we basically always need this
+    data = average_col(data, ITERATION_COL)
 
     #generate graphs
     os.chdir(output_path)

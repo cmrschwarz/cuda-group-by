@@ -184,11 +184,11 @@ void group_by_hashtable(
     // clear the hashtable.
     // this is only necessary since we share the memory
     // for the two different template instantiations
-    // therefore its not counted towards the runtime
+    // therefore it's not counted towards the runtime
     cudaMemset(
         group_ht, 0,
         (1 << (MAX_GROUP_BITS + GROUP_HT_SIZE_SHIFT)) *
-            sizeof(group_ht_entry<true>));
+            sizeof(group_ht_entry<EAGER_OUT_IDX>));
     CUDA_TRY(cudaEventRecord(start_event));
     // reset number of groups found
     size_t zero = 0;

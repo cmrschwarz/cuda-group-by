@@ -18,15 +18,20 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA true
+#define BIG_DATA false
 
+#if BIG_DATA
+#define ITERATION_COUNT 4
+#else
+#define ITERATION_COUNT 3
+#endif
 #if BIG_DATA
 #define BENCHMARK_STREAMS_MAX 16
 const size_t benchmark_stream_count_variants[] = {0, 1, 2,
                                                   4, 8, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {0, 1, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, 2, BENCHMARK_STREAMS_MAX};
 #endif
 
 #if BIG_DATA
@@ -35,20 +40,20 @@ const size_t benchmark_stream_count_variants[] = {0, 1, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     2, 4, 16, 32, 128, 1024, 16384, BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 16)
-const size_t benchmark_row_count_variants[] = {2, 32, 128, BENCHMARK_ROWS_MAX};
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 17)
+const size_t benchmark_row_count_variants[] = {128, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {32, 128, 1024};
+const int benchmark_gpu_block_dim_variants[] = {32, 128, 256};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_grid_dim_variants[] = {1, 8, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {1, 64, 1024};
+const int benchmark_gpu_grid_dim_variants[] = {128, 512};
 #endif
 
 #if BIG_DATA
@@ -275,7 +280,7 @@ bool validate(bench_data* bd, int row_count_variant)
 
 void record_time_and_validate(
     bench_data* bd, int group_count, int row_count_variant, int grid_dim,
-    int block_dim, int stream_count, const char* approach_name)
+    int block_dim, int stream_count, int iteration, const char* approach_name)
 {
     CUDA_TRY(cudaEventSynchronize(bd->end_event));
     float time;
@@ -286,18 +291,54 @@ void record_time_and_validate(
     bd->output_csv << approach_name << ";" << group_count << ";"
                    << benchmark_row_count_variants[row_count_variant] << ";"
                    << grid_dim << ";" << block_dim << ";" << stream_count << ";"
-                   << time << std::endl;
+                   << iteration << ";" << time << std::endl;
 }
 
+template <int GROUP_BIT_COUNT>
+void run_approaches(
+    bench_data* bd, int row_count_variant, int grid_dim, int block_dim,
+    int stream_count, int iteration)
+{
+    constexpr size_t GROUP_COUNT = (1 << GROUP_BIT_COUNT);
+    size_t row_count = benchmark_row_count_variants[row_count_variant];
+#if ENABLE_APPROACH_HASHTABLE
+    if (approach_hashtable_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        group_by_hashtable<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "hashtable_eager_out_idx");
+        group_by_hashtable<GROUP_BIT_COUNT, false>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "hashtable_lazy_out_idx");
+    }
+#endif
+#if ENABLE_APPROACH_THREAD_PER_GROUP
+    if (approach_thread_per_group_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+
+        group_by_thread_per_group<GROUP_BIT_COUNT>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "thread_per_group");
+    }
+#endif
+}
 template <int GROUP_BIT_COUNT>
 void run_benchmarks_for_group_bit_count(bench_data* bd)
 {
     static_assert(GROUP_BIT_COUNT <= BENCHMARK_GROUP_BITS_MAX);
     setup_bench_data(bd, 1 << GROUP_BIT_COUNT);
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
-        size_t row_count = benchmark_row_count_variants[rcv];
         // artificially reduce the row counts
-        bd->data_gpu.input.row_count = row_count;
+        bd->data_gpu.input.row_count = benchmark_row_count_variants[rcv];
         for (int gdv = 0; gdv < BENCHMARK_GPU_GRID_DIM_VARIANT_COUNT; gdv++) {
             int grid_dim = benchmark_gpu_grid_dim_variants[gdv];
             for (int bdv = 0; bdv < BENCHMARK_GPU_BLOCK_DIM_VARIANT_COUNT;
@@ -306,40 +347,10 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                 for (int scv = 0; scv < BENCHMARK_STREAM_COUNT_VARIANT_COUNT;
                      scv++) {
                     int stream_count = benchmark_stream_count_variants[scv];
-#if ENABLE_APPROACH_HASHTABLE
-                    if (approach_hashtable_available(
-                            GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
-                            stream_count)) {
-                        group_by_hashtable<GROUP_BIT_COUNT, true>(
-                            &bd->data_gpu, grid_dim, block_dim, stream_count,
-                            bd->streams, bd->events, bd->start_event,
-                            bd->end_event);
-                        record_time_and_validate(
-                            bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
-                            stream_count, "hashtable_eager_out_idx");
-                        group_by_hashtable<GROUP_BIT_COUNT, false>(
-                            &bd->data_gpu, grid_dim, block_dim, stream_count,
-                            bd->streams, bd->events, bd->start_event,
-                            bd->end_event);
-                        record_time_and_validate(
-                            bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
-                            stream_count, "hashtable_lazy_out_idx");
+                    for (int it = 0; it < ITERATION_COUNT; it++) {
+                        run_approaches<GROUP_BIT_COUNT>(
+                            bd, rcv, grid_dim, block_dim, stream_count, it);
                     }
-#endif
-#if ENABLE_APPROACH_THREAD_PER_GROUP
-                    if (approach_thread_per_group_available(
-                            GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
-                            stream_count)) {
-
-                        group_by_thread_per_group<GROUP_BIT_COUNT>(
-                            &bd->data_gpu, grid_dim, block_dim, stream_count,
-                            bd->streams, bd->events, bd->start_event,
-                            bd->end_event);
-                        record_time_and_validate(
-                            bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
-                            stream_count, "thread_per_group");
-                    }
-#endif
                 }
             }
         }
@@ -351,8 +362,8 @@ int main()
     bench_data bench_data;
     alloc_bench_data(&bench_data);
     new (&bench_data.output_csv) std::ofstream{"bench.csv"};
-    bench_data.output_csv
-        << "approach;groups;rows;grid dim;block dim;stream count;time in ms\n";
+    bench_data.output_csv << "approach;groups;rows;grid dim;block dim;stream "
+                             "count; run index; time in ms\n";
     bench_data.output_csv << std::fixed << std::setprecision(20);
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
