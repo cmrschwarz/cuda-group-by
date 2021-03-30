@@ -1,27 +1,51 @@
 #pragma once
+#include <type_traits>
 #include "cuda_group_by.cuh"
 
 // number of bits to 'oversize' the hashtable by relative to MAX_GROUP_BITS
 // we use a shift instead of a multiplier to make sure we keep the nice power of
 // two properties
 #define GROUP_HT_SIZE_SHIFT 1
-#define GROUP_HT_OUTPUT_IDX_DUMMY_VAL ((size_t)-1)
 #define GROUP_HT_EMPTY_VALUE 0
 
 __device__ size_t group_ht_groups_found = 0;
+__device__ bool empty_group_used = false;
 
-struct group_ht_entry {
+struct group_ht_entry_base {
     uint64_t group;
     uint64_t aggregate;
-    size_t output_idx;
 };
 
-static group_ht_entry* group_ht;
+template <bool EAGER_OUT_IDX>
+struct group_ht_entry : public group_ht_entry_base {
+    __device__ void eager_inc_out_idx()
+    {
+        // does nothing, since this is the non eager specialization of this
+    }
+    // ONLY CALL THIS ONCE!
+    __device__ size_t aquire_out_idx()
+    {
+        return atomicAdd((cudaUInt64_t*)&group_ht_groups_found, 1);
+    }
+};
+template <> struct group_ht_entry<true> : public group_ht_entry_base {
+    size_t output_idx;
+    __device__ void eager_inc_out_idx()
+    {
+        output_idx = atomicAdd((cudaUInt64_t*)&group_ht_groups_found, 1);
+    }
+    __device__ size_t aquire_out_idx()
+    {
+        return output_idx;
+    }
+};
+
+static void* group_ht;
 
 static inline void group_by_hashtable_init(size_t max_groups)
 {
     const size_t ht_size =
-        (max_groups << GROUP_HT_SIZE_SHIFT) * sizeof(group_ht_entry);
+        (max_groups << GROUP_HT_SIZE_SHIFT) * sizeof(group_ht_entry<true>);
     CUDA_TRY(cudaMalloc(&group_ht, ht_size));
     CUDA_TRY(cudaMemset(group_ht, 0, ht_size));
     // if we want to use a different empty value (0 is probably a common group)
@@ -34,9 +58,10 @@ static inline void group_by_hashtable_fin()
     CUDA_TRY(cudaFree(group_ht));
 }
 
-template <int MAX_GROUP_BITS>
+template <int MAX_GROUP_BITS, bool EAGER_OUT_IDX>
 __global__ void kernel_fill_group_ht(
-    db_table input, group_ht_entry* hashtable, int stream_count, int stream_idx)
+    db_table input, group_ht_entry<EAGER_OUT_IDX>* hashtable, int stream_count,
+    int stream_idx)
 {
     constexpr size_t GROUP_HT_SIZE = ((size_t)1)
                                      << (MAX_GROUP_BITS + GROUP_HT_SIZE_SHIFT);
@@ -47,10 +72,10 @@ __global__ void kernel_fill_group_ht(
     for (size_t i = tid; i < input.row_count; i += stride) {
         uint64_t group = input.group_col[i];
         uint64_t agg = input.aggregate_col[i];
-        group_ht_entry* hte;
+        group_ht_entry<EAGER_OUT_IDX>* hte;
         if (group == GROUP_HT_EMPTY_VALUE) {
             hte = &hashtable[0];
-            hte->output_idx = GROUP_HT_OUTPUT_IDX_DUMMY_VAL;
+            empty_group_used = true;
         }
         else {
             size_t hash = group & GROUPS_MASK;
@@ -64,15 +89,16 @@ __global__ void kernel_fill_group_ht(
                         group);
                     if (found == GROUP_HT_EMPTY_VALUE) {
                         // atomicInc doesn't exist for 64 bit...
-                        hte->output_idx =
-                            atomicAdd((cudaUInt64_t*)&group_ht_groups_found, 1);
-                        /*
-                        // DEBUG
-                        printf(
-                            "assigning index %llu to group %llu in ht slot "
-                            "%llu\n",
-                            hte->output_idx, hte->group, hte - hashtable);
-                        */
+                        if (EAGER_OUT_IDX) {
+                            hte->eager_inc_out_idx();
+                            /*
+                            // DEBUG
+                            printf(
+                                "assigning index %llu to group %llu in ht slot "
+                                "%llu\n",
+                                hte->output_idx, hte->group, hte - hashtable);
+                            */
+                        }
                         break;
                     }
                     if (found == group) break;
@@ -91,9 +117,9 @@ __global__ void kernel_fill_group_ht(
     }
 }
 
-template <int MAX_GROUP_BITS>
+template <int MAX_GROUP_BITS, bool EAGER_OUT_IDX>
 __global__ void kernel_write_out_group_ht(
-    db_table output, group_ht_entry* hashtable, int stream_count,
+    db_table output, group_ht_entry<EAGER_OUT_IDX>* hashtable, int stream_count,
     int stream_idx)
 {
     constexpr size_t GROUP_HT_SIZE = ((size_t)1)
@@ -102,24 +128,31 @@ __global__ void kernel_write_out_group_ht(
               stream_idx * blockDim.x * gridDim.x;
     int stride = blockDim.x * gridDim.x * stream_count;
     if (tid == 0) {
-        group_ht_entry* hte = &hashtable[0];
-        if (hte->output_idx == GROUP_HT_OUTPUT_IDX_DUMMY_VAL) {
-            size_t idx = group_ht_groups_found;
-            // if the EMPTY_VAL group actually occured, increment groups found
-            // no race here, nobody else is currently interested in this value
-            group_ht_groups_found++;
+        group_ht_entry<EAGER_OUT_IDX>* hte = &hashtable[0];
+        if (empty_group_used) {
+            size_t idx;
+            if (EAGER_OUT_IDX) {
+                // if the EMPTY_VAL group actually occured, increment groups
+                // found no race here, nobody else is currently interested in
+                // this value
+                idx = group_ht_groups_found++;
+            }
+            else {
+                idx = atomicAdd((cudaUInt64_t*)&group_ht_groups_found, 1);
+            }
             output.group_col[idx] = GROUP_HT_EMPTY_VALUE;
             output.aggregate_col[idx] = hte->aggregate;
-            hte->output_idx = 0;
             hte->aggregate = 0;
+            empty_group_used = false;
         }
         tid += stride;
     }
     for (size_t i = tid; i < GROUP_HT_SIZE; i += stride) {
-        group_ht_entry* hte = &hashtable[i];
+        group_ht_entry<EAGER_OUT_IDX>* hte = &hashtable[i];
         if (hte->group != GROUP_HT_EMPTY_VALUE) {
-            output.group_col[hte->output_idx] = hte->group;
-            output.aggregate_col[hte->output_idx] = hte->aggregate;
+            size_t out_idx = hte->aquire_out_idx();
+            output.group_col[out_idx] = hte->group;
+            output.aggregate_col[out_idx] = hte->aggregate;
             /*
             // DEBUG
             printf(
@@ -141,7 +174,7 @@ static inline bool approach_hashtable_available(
     return true;
 }
 
-template <int MAX_GROUP_BITS>
+template <int MAX_GROUP_BITS, bool EAGER_OUT_IDX>
 void group_by_hashtable(
     gpu_data* gd, int grid_size, int block_size, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
@@ -158,9 +191,10 @@ void group_by_hashtable(
     int actual_stream_count = stream_count ? stream_count : 1;
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
-        kernel_fill_group_ht<MAX_GROUP_BITS>
+        kernel_fill_group_ht<MAX_GROUP_BITS, EAGER_OUT_IDX>
             <<<grid_size, block_size, 0, stream>>>(
-                gd->input, group_ht, actual_stream_count, i);
+                gd->input, (group_ht_entry<EAGER_OUT_IDX>*)group_ht,
+                actual_stream_count, i);
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
@@ -180,9 +214,10 @@ void group_by_hashtable(
                 cudaStreamWaitEvent(stream, events[j], 0);
             }
         }
-        kernel_write_out_group_ht<MAX_GROUP_BITS>
+        kernel_write_out_group_ht<MAX_GROUP_BITS, EAGER_OUT_IDX>
             <<<grid_size, block_size, 0, stream>>>(
-                gd->output, group_ht, actual_stream_count, i);
+                gd->output, (group_ht_entry<EAGER_OUT_IDX>*)group_ht,
+                actual_stream_count, i);
     }
     CUDA_TRY(cudaEventRecord(end_event));
     CUDA_TRY(cudaGetLastError());

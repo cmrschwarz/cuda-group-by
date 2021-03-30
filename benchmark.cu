@@ -10,7 +10,7 @@
 #include "group_by_thread_per_group.cuh"
 
 // set to false to reduce data size for debugging
-#define BIG_DATA true
+#define BIG_DATA false
 
 #if BIG_DATA
 #define BENCHMARK_STREAMS_MAX 16
@@ -293,7 +293,7 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                     if (approach_hashtable_available(
                             GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
                             stream_count)) {
-                        group_by_hashtable<GROUP_BIT_COUNT>(
+                        group_by_hashtable<GROUP_BIT_COUNT, false>(
                             &bd->data_gpu, grid_dim, block_dim, stream_count,
                             bd->streams, bd->events, bd->start_event,
                             bd->end_event);
