@@ -184,11 +184,17 @@ def throughput_over_group_size_barring_row_count(data):
     rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
     rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
     ax.set_title(f"Throughput over Group Count, best in class\nrowcounts: {rowcounts_str}")
-    by_group_count = classify(data, GROUP_COUNT_COL)
-    bar_width = 1.0 / (len(by_group_count) + 1)
-    bar_gap = 0.07
     by_approaches = classify(data, APPROACH_COL)
-
+    approach_count = len(by_approaches)
+    bar_width = 1.0 / (approach_count + 1)
+    bar_gap = 0.07
+    bar_count_per_group_count = {}
+    bar_index_per_group_count = {}
+    i = 0
+    for gc, rows in sorted(classify(data, GROUP_COUNT_COL).items()):
+        bar_count_per_group_count[gc] = len(classify(rows, APPROACH_COL))
+        bar_index_per_group_count[gc] = i
+        i += 1
     
     for ap_id, (ap, ap_rows) in enumerate(by_approaches.items()):
         prev_y_vals = []
@@ -203,14 +209,15 @@ def throughput_over_group_size_barring_row_count(data):
                 highest_in_class(by_group_count, THROUGHPUT_COL).values(), 
                 GROUP_COUNT_COL
             )
+            group_counts = col_vals(best_in_class, GROUP_COUNT_COL)
             y_vals = col_vals(best_in_class,THROUGHPUT_COL)
             y_bar_vals = list(y_vals)
             if prev_y_vals != []:
                 for i in range(0, len(prev_y_vals)):
                     y_bar_vals[i] -= prev_y_vals[i] * (1 + bar_gap)
             x_positions = [
-                i + (ap_id - len(by_group_count) / 2. + 1) * bar_width 
-                for i in range(0, len(y_vals))
+                bar_index_per_group_count[gc] + (ap_id - bar_count_per_group_count[gc] / 2. + 0.5) * bar_width 
+                for gc in group_counts
             ]
             
             ax.bar(
@@ -219,9 +226,9 @@ def throughput_over_group_size_barring_row_count(data):
                 bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals != [] else 0,
                 color=approach_colors[ap]
             )
-            ax.set_xticks(range(0, len(x_positions)))
-            ax.set_xticklabels(col_vals(best_in_class, GROUP_COUNT_COL))
             prev_y_vals = y_vals
+    ax.set_xticks(range(0, len(bar_count_per_group_count)))
+    ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
     ax.set_yscale("log")
     plt.savefig(f"throughput_over_group_size_barring_row_count.png")
@@ -257,7 +264,6 @@ def main():
         input_path = sys.argv[1]
     else:
         input_path="bench.csv"
-
     if len(sys.argv) > 2:
         output_path = sys.argv[2]
     else:
