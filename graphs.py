@@ -191,9 +191,9 @@ def throughput_over_group_size_barring_row_count(data):
 
     
     for ap_id, (ap, ap_rows) in enumerate(by_approaches.items()):
-        prev_y_vals = None
+        prev_y_vals = []
         by_row_count = sorted(classify(ap_rows, ROW_COUNT_COL).items())
-        for (rc, rc_rows) in by_row_count:
+        for (_, rc_rows) in by_row_count:
             by_group_count = classify(rc_rows, GROUP_COUNT_COL)
             # fixed approach, row count and group count
             # averaged iterations
@@ -205,7 +205,7 @@ def throughput_over_group_size_barring_row_count(data):
             )
             y_vals = col_vals(best_in_class,THROUGHPUT_COL)
             y_bar_vals = list(y_vals)
-            if prev_y_vals is not None:
+            if prev_y_vals != []:
                 for i in range(0, len(prev_y_vals)):
                     y_bar_vals[i] -= prev_y_vals[i] * (1 + bar_gap)
             x_positions = [
@@ -215,8 +215,8 @@ def throughput_over_group_size_barring_row_count(data):
             
             ax.bar(
                 x_positions, y_bar_vals, bar_width, 
-                label = f"{ap}" if prev_y_vals is None else None,
-                bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals is not None else 0,
+                label = f"{ap}" if prev_y_vals == [] else None,
+                bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals != [] else 0,
                 color=approach_colors[ap]
             )
             ax.set_xticks(range(0, len(x_positions)))
