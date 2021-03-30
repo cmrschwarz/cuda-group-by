@@ -6,8 +6,16 @@
 #include <fstream>
 #include <iomanip>
 
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_THREAD_PER_GROUP false
+
+#if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
+#endif
+
+#if ENABLE_APPROACH_THREAD_PER_GROUP
 #include "group_by_thread_per_group.cuh"
+#endif
 
 // set to false to reduce data size for debugging
 #define BIG_DATA false
@@ -130,14 +138,22 @@ void alloc_bench_data(bench_data* bd)
     CUDA_TRY(cudaEventCreate(&bd->end_event));
 
     gpu_data_alloc(&bd->data_gpu, BENCHMARK_ROWS_MAX, BENCHMARK_GROUPS_MAX);
+#if ENABLE_APPROACH_HASHTABLE
     group_by_hashtable_init(BENCHMARK_ROWS_MAX);
+#endif
+#if ENABLE_APPROACH_THREAD_PER_GROUP
     group_by_thread_per_group_init();
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
-    group_by_thread_per_group_fin();
+#if ENABLE_APPROACH_HASHTABLE
     group_by_hashtable_fin();
+#endif
+#if ENABLE_APPROACH_THREAD_PER_GROUP
+    group_by_thread_per_group_fin();
+#endif
 
     gpu_data_free(&bd->data_gpu);
 
@@ -290,6 +306,7 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                 for (int scv = 0; scv < BENCHMARK_STREAM_COUNT_VARIANT_COUNT;
                      scv++) {
                     int stream_count = benchmark_stream_count_variants[scv];
+#if ENABLE_APPROACH_HASHTABLE
                     if (approach_hashtable_available(
                             GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
                             stream_count)) {
@@ -301,6 +318,8 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                             bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
                             stream_count, "hashtable");
                     }
+#endif
+#if ENABLE_APPROACH_THREAD_PER_GROUP
                     if (approach_thread_per_group_available(
                             GROUP_BIT_COUNT, row_count, grid_dim, block_dim,
                             stream_count)) {
@@ -313,6 +332,7 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                             bd, 1 << GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
                             stream_count, "thread_per_group");
                     }
+#endif
                 }
             }
         }
