@@ -181,16 +181,18 @@ def throughput_over_group_size_barring_row_count(data):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
-    ax.set_title(f"Throughput over Group Count, best in class")
+    rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
+    rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
+    ax.set_title(f"Throughput over Group Count, best in class\nrowcounts: {rowcounts_str}")
     by_group_count = classify(data, GROUP_COUNT_COL)
     bar_width = 1.0 / (len(by_group_count) + 1)
     bar_gap = 0.07
     by_approaches = classify(data, APPROACH_COL)
+
+    
     for ap_id, (ap, ap_rows) in enumerate(by_approaches.items()):
         prev_y_vals = None
         by_row_count = sorted(classify(ap_rows, ROW_COUNT_COL).items())
-        rowcounts = [kv[0] for kv in by_row_count]
-        rowcounts_str = f"{{{', '.join([str(rc) for rc in rowcounts])}}}"
         for (rc, rc_rows) in by_row_count:
             by_group_count = classify(rc_rows, GROUP_COUNT_COL)
             # fixed approach, row count and group count
@@ -213,7 +215,7 @@ def throughput_over_group_size_barring_row_count(data):
             
             ax.bar(
                 x_positions, y_bar_vals, bar_width, 
-                label = f"{ap}, row counts={rowcounts_str}" if prev_y_vals is None else None,
+                label = f"{ap}" if prev_y_vals is None else None,
                 bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals is not None else 0,
                 color=approach_colors[ap]
             )
@@ -233,6 +235,7 @@ def read_csv(path):
         # legacy support for benchmarks without iterations 
         # we need to subtract 2 because of the virtual THROUGHPUT column
         iters_fix = 0 if len(header) != COLUMN_COUNT - 2 else 1
+        
         for csv_row in reader:
             data_row = [None] * COLUMN_COUNT
             data_row[APPROACH_COL] = (csv_row[APPROACH_COL])
