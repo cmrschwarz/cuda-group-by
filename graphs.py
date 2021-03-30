@@ -229,7 +229,10 @@ def read_csv(path):
     data=[]
     with open(path) as file:
         reader = csv.reader(file, delimiter=';')
-        next(reader) # skip header
+        header = next(reader) # skip header
+        # legacy support for benchmarks without iterations 
+        # we need to subtract 2 because of the virtual THROUGHPUT column
+        iters_fix = 0 if len(header) != COLUMN_COUNT - 2 else 1
         for csv_row in reader:
             data_row = [None] * COLUMN_COUNT
             data_row[APPROACH_COL] = (csv_row[APPROACH_COL])
@@ -238,8 +241,8 @@ def read_csv(path):
             data_row[GRID_DIM_COL] = (int(csv_row[GRID_DIM_COL]))
             data_row[BLOCK_DIM_COL] = (int(csv_row[BLOCK_DIM_COL]))
             data_row[STREAM_COUNT_COL] = (int(csv_row[STREAM_COUNT_COL]))
-            data_row[ITERATION_COL] = (int(csv_row[ITERATION_COL]))
-            data_row[TIME_MS_COL] = (float(csv_row[TIME_MS_COL]))
+            data_row[ITERATION_COL] = 0 if iters_fix != 0 else (int(csv_row[ITERATION_COL]))
+            data_row[TIME_MS_COL] = (float(csv_row[TIME_MS_COL - iters_fix]))
             data_row[THROUGHPUT_COL] = (1000. * DB_ROW_SIZE_BYTES * data_row[ROW_COUNT_COL]) / data_row[TIME_MS_COL] / 2**30
             data.append(data_row)
     return data
