@@ -4,6 +4,7 @@ from matplotlib.axes import Axes
 import csv
 import sys
 import os
+import math
 
 #constants
 DB_ROW_SIZE_BYTES = 16
@@ -177,7 +178,7 @@ def throughput_over_stream_count(data, group_count):
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
 
-def throughput_over_group_size_barring_row_count(data):
+def throughput_over_group_size_barring_approaches_stacking_row_count(data):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
@@ -231,7 +232,124 @@ def throughput_over_group_size_barring_row_count(data):
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
     ax.set_yscale("log")
-    plt.savefig(f"throughput_over_group_size_barring_row_count.png")
+    plt.savefig(f"throughput_over_group_size_barring_approaches_stacking_row_count.png")
+
+def throughput_over_group_size_barring_row_count_stacking_approaches(data):
+    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    ax.set_xlabel("group count")
+    ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+    rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
+    rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
+    ax.set_title(f"Throughput over Group Count, best in class\nrowcounts: {rowcounts_str}")
+    by_row_count = classify(data, ROW_COUNT_COL)
+    n_row_counts = len(by_row_count)
+    bar_width = 1.0 / (n_row_counts + 1)
+    bar_gap=bar_width * 0.1
+    bar_width -= bar_gap
+    max_diff_to_split = 0.01
+    graph_height = math.log(max_col_val(data, THROUGHPUT_COL))
+    bar_count_per_group_count = {}
+    bar_index_per_group_count = {}
+    by_group_count = classify(data, GROUP_COUNT_COL)
+    i = 0
+    for gc, rows in sorted(by_group_count.items()):
+        bar_count_per_group_count[gc] = len(classify(rows, ROW_COUNT_COL))
+        bar_index_per_group_count[gc] = i
+        i += 1
+
+    chart_data_per_group_count = {}
+    for gc, gc_rows in by_group_count.items():
+        approach_vals_by_row_count = {}
+        for rc in by_row_count.keys():
+            approach_vals_by_row_count[rc] = []
+
+        by_approaches = sorted(classify(gc_rows, APPROACH_COL).items())
+        for (ap, ap_rows) in by_approaches:
+            by_row_count = classify(ap_rows, ROW_COUNT_COL)
+            # fixed approach, row count and group count
+            # averaged iterations
+            # --> best in class over grid dim, block dim and stream count  
+            for rc, row in highest_in_class(by_row_count, THROUGHPUT_COL).items():
+                approach_vals_by_row_count[rc].append((ap, row[THROUGHPUT_COL]))
+        # sort approaches for each row count -> bar
+        for rc, ap_vals_of_rc in approach_vals_by_row_count.items():
+            ap_vals_of_rc.sort(key=lambda ap_tp_tup: ap_tp_tup[1])
+            # group approaches differing very little so we can split the bar
+            last_base_val_log = math.log(ap_vals_of_rc[0][1])
+            last_base_idx = 0
+            ap_groups_of_rc = []
+            for i in range(0, len(ap_vals_of_rc)):
+                next_in_bounds = (i+1 < len(ap_vals_of_rc))
+                val_log = 0 if not next_in_bounds else math.log(ap_vals_of_rc[i+1][1])
+                if (
+                    not next_in_bounds
+                    or (val_log - last_base_val_log) / graph_height > max_diff_to_split
+                ):
+                    group = ap_vals_of_rc[last_base_idx:i+1]
+                    (aps, tps) = zip(*group)
+                    ap_groups_of_rc.append((
+                        {ap: idx for idx, ap in enumerate(sorted(aps))},
+                        sum(tps) / len(tps)
+                    ))
+                    if next_in_bounds:
+                        last_base_idx = i+1
+                        last_base_val_log = val_log
+            approach_vals_by_row_count[rc] = ap_groups_of_rc
+
+        chart_data_per_group_count[gc] = approach_vals_by_row_count
+
+
+    
+    # sort bar groups by group count
+    chart_data_per_group_count = sorted(chart_data_per_group_count.items())
+
+    for ap in classify(data, APPROACH_COL).keys():
+        x_vals = []
+        y_vals = []
+        widths = []
+        bottoms = []
+        for gc, approach_vals_by_row_count in chart_data_per_group_count:
+            for rc_index, (rc, ap_vals_of_rc) in enumerate(sorted(approach_vals_by_row_count.items())):
+                share_count = 1
+                shared_idx = 0
+                for i, (aps, _) in enumerate(ap_vals_of_rc):
+                    if ap in aps:
+                        share_count = len(aps) 
+                        shared_idx = aps[ap]
+                        idx = i
+                        break
+                else:
+                    continue
+                x_vals.append( 
+                    bar_gap * 0.5 +
+                    bar_index_per_group_count[gc] 
+                    + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * (bar_width + bar_gap)  
+                    + (shared_idx - share_count / 2 + 0.5) * (bar_width / share_count)
+                )
+                bottom = ap_vals_of_rc[idx-1][1] if idx > 0 else 0
+                y_vals.append(ap_vals_of_rc[idx][1] - bottom)
+                widths.append(bar_width / share_count)
+                bottoms.append(bottom)
+        ax.bar(
+            x_vals, y_vals, widths, 
+            label = f"{ap}",
+            bottom=bottoms,
+            color=approach_colors[ap]
+        )
+    for gc, approach_vals_by_row_count in chart_data_per_group_count:
+        for rc_index, (rc, ap_vals_of_rc) in enumerate(sorted(approach_vals_by_row_count.items())):
+            plt.annotate(
+                str(rc), ha='center', va='bottom',
+                xy=(
+                    bar_index_per_group_count[gc] + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * bar_width,
+                    ap_vals_of_rc[-1][1]
+                )
+            )
+    ax.set_xticks(range(0, len(bar_count_per_group_count)))
+    ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
+    ax.legend()
+    ax.set_yscale("log")
+    plt.savefig(f"throughput_over_group_size_barring_row_count_stacking_approaches.png")
 
 
 def read_csv(path):
@@ -280,7 +398,8 @@ def main():
     os.chdir(output_path)
     throughput_over_group_count(data)
     throughput_over_stream_count(data, 32)
-    throughput_over_group_size_barring_row_count(data)
+    throughput_over_group_size_barring_approaches_stacking_row_count(data)
+    throughput_over_group_size_barring_row_count_stacking_approaches(data)
 
 if __name__ == "__main__":
     main()
