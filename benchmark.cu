@@ -41,7 +41,7 @@ const size_t benchmark_row_count_variants[] = {
     2, 4, 16, 32, 128, 1024, 16384, BENCHMARK_ROWS_MAX};
 #else
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
-const size_t benchmark_row_count_variants[] = {128, 1024, BENCHMARK_ROWS_MAX};
+const size_t benchmark_row_count_variants[] = {128, 4096, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA

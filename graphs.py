@@ -110,6 +110,9 @@ def sort_by_col(rows, sort_col):
 def max_col_val(rows, col):
     return max(rows, key=lambda r: r[col])[col]
 
+def min_col_val(rows, col):
+    return min(rows, key=lambda r: r[col])[col]
+
 def filter_col_val(rows, col, val):
     return list(filter(lambda r: r[col] == val, rows))
 
@@ -178,17 +181,20 @@ def throughput_over_stream_count(data, group_count):
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
 
-def throughput_over_group_size_barring_approaches_stacking_row_count(data):
+def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
-    ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+    ax.set_ylabel("runtime (ms)")
     rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
     rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
-    ax.set_title(f"Throughput over Group Count, best in class\nrowcounts: {rowcounts_str}")
+    ax.set_title(f"Runtime over Group Count, best in class\nrowcounts: {rowcounts_str}\n")
     by_approaches = classify(data, APPROACH_COL)
     approach_count = len(by_approaches)
     bar_width = 1.0 / (approach_count + 1)
-    bar_gap = 0.07
+    graph_max_value = max_col_val(data, TIME_MS_COL)
+    graph_min_value = min_col_val(data, TIME_MS_COL)
+    graph_height = math.log(graph_max_value, 10) - math.log(graph_min_value, 10)
+    bar_gap = 0.01 * graph_height
     bar_count_per_group_count = {}
     bar_index_per_group_count = {}
     i = 0
@@ -207,26 +213,38 @@ def throughput_over_group_size_barring_approaches_stacking_row_count(data):
             # --> best in class over grid dim, block dim and stream count  
 
             best_in_class = sort_by_col(
-                highest_in_class(by_group_count, THROUGHPUT_COL).values(), 
+                lowest_in_class(by_group_count, TIME_MS_COL).values(), 
                 GROUP_COUNT_COL
             )
             group_counts = col_vals(best_in_class, GROUP_COUNT_COL)
-            y_vals = col_vals(best_in_class,THROUGHPUT_COL)
+            y_vals = col_vals(best_in_class,TIME_MS_COL)
             y_bar_vals = list(y_vals)
-            if prev_y_vals != []:
-                for i in range(0, len(prev_y_vals)):
-                    y_bar_vals[i] -= prev_y_vals[i] * (1 + bar_gap)
             x_positions = [
                 bar_index_per_group_count[gc] + (ap_id - bar_count_per_group_count[gc] / 2. + 0.5) * bar_width 
                 for gc in group_counts
             ]
-            
-            ax.bar(
-                x_positions, y_bar_vals, bar_width, 
-                label = f"{ap}" if prev_y_vals == [] else None,
-                bottom=[y * (1 + bar_gap) for y in prev_y_vals] if prev_y_vals != [] else 0,
-                color=approach_colors[ap]
-            )
+            bottoms = 0
+            if prev_y_vals != []:
+                bottoms = [y * (10 ** bar_gap) for y in prev_y_vals] 
+                delc = 0
+                for i in range(0, len(prev_y_vals)):
+                    diff = math.log(y_vals[i], 10) - (math.log(prev_y_vals[i], 10) + bar_gap)
+                    if  diff < bar_gap * 0.5:
+                        del x_positions[i-delc]
+                        y_vals[i] = prev_y_vals[i]
+                        del y_bar_vals[i - delc]
+                        del bottoms[i - delc]
+                        delc+=1
+                    else:
+                        y_bar_vals[i - delc] -= prev_y_vals[i] * (10 ** bar_gap)
+            if x_positions != []:
+                col = approach_colors[ap]
+                ax.bar(
+                    x_positions, y_bar_vals, bar_width, 
+                    label = f"{ap}" if prev_y_vals == [] else None,
+                    bottom=bottoms,
+                    color=col
+                )
             prev_y_vals = y_vals
     ax.set_xticks(range(0, len(bar_count_per_group_count)))
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
@@ -238,16 +256,24 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
-    rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
-    rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
-    ax.set_title(f"Throughput over Group Count, best in class\nrowcounts: {rowcounts_str}")
+    #rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
+    #rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
+    log_base = 10
+    graph_height = (
+        math.log(max_col_val(data, THROUGHPUT_COL), log_base) 
+        - math.log(min_col_val(data, THROUGHPUT_COL), log_base)
+    )
+    split_diff = 0.01 * graph_height
+    ax.set_title(
+        "Throughput over Group Count, Bars per Row Count, best in class\n" 
+        + f"merge criterium: difference of logs < {split_diff:.5f}\n"
+    )
     by_row_count = classify(data, ROW_COUNT_COL)
     n_row_counts = len(by_row_count)
     bar_width = 1.0 / (n_row_counts + 1)
     bar_gap=bar_width * 0.1
     bar_width -= bar_gap
-    max_diff_to_split = 0.01
-    graph_height = math.log(max_col_val(data, THROUGHPUT_COL))
+   
     bar_count_per_group_count = {}
     bar_index_per_group_count = {}
     by_group_count = classify(data, GROUP_COUNT_COL)
@@ -275,15 +301,15 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data):
         for rc, ap_vals_of_rc in approach_vals_by_row_count.items():
             ap_vals_of_rc.sort(key=lambda ap_tp_tup: ap_tp_tup[1])
             # group approaches differing very little so we can split the bar
-            last_base_val_log = math.log(ap_vals_of_rc[0][1])
+            last_base_val_log = math.log(ap_vals_of_rc[0][1], 10)
             last_base_idx = 0
             ap_groups_of_rc = []
             for i in range(0, len(ap_vals_of_rc)):
                 next_in_bounds = (i+1 < len(ap_vals_of_rc))
-                val_log = 0 if not next_in_bounds else math.log(ap_vals_of_rc[i+1][1])
+                val_log = 0 if not next_in_bounds else math.log(ap_vals_of_rc[i+1][1], log_base)
                 if (
                     not next_in_bounds
-                    or (val_log - last_base_val_log) / graph_height > max_diff_to_split
+                    or (val_log - last_base_val_log) >= split_diff
                 ):
                     group = ap_vals_of_rc[last_base_idx:i+1]
                     (aps, tps) = zip(*group)
@@ -341,14 +367,15 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data):
             plt.annotate(
                 str(rc), ha='center', va='bottom',
                 xy=(
-                    bar_index_per_group_count[gc] + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * bar_width,
+                    0.5 * bar_gap +
+                    bar_index_per_group_count[gc] + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * (bar_width + bar_gap),
                     ap_vals_of_rc[-1][1]
                 )
             )
     ax.set_xticks(range(0, len(bar_count_per_group_count)))
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
-    ax.set_yscale("log")
+    ax.set_yscale("log", basey=log_base)
     plt.savefig(f"throughput_over_group_size_barring_row_count_stacking_approaches.png")
 
 
@@ -398,7 +425,7 @@ def main():
     os.chdir(output_path)
     throughput_over_group_count(data)
     throughput_over_stream_count(data, 32)
-    throughput_over_group_size_barring_approaches_stacking_row_count(data)
+    runtime_over_group_size_barring_approaches_stacking_row_count(data)
     throughput_over_group_size_barring_row_count_stacking_approaches(data)
 
 if __name__ == "__main__":
