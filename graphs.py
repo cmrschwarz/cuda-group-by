@@ -252,21 +252,28 @@ def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     ax.set_yscale("log")
     plt.savefig(f"throughput_over_group_size_barring_approaches_stacking_row_count.png")
 
-def throughput_over_group_size_barring_row_count_stacking_approaches(data):
+def throughput_over_group_size_barring_row_count_stacking_approaches(data, logscale):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
     #rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
     #rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
     log_base = 10
+    if logscale:
+        transform = lambda x: math.log(x, log_base) 
+    else:
+        transform = lambda x: x
+
     graph_height = (
-        math.log(max_col_val(data, THROUGHPUT_COL), log_base) 
-        - math.log(min_col_val(data, THROUGHPUT_COL), log_base)
+        transform(max_col_val(data, THROUGHPUT_COL))
+        - transform(min_col_val(data, THROUGHPUT_COL))
     )
     split_diff = 0.01 * graph_height
     ax.set_title(
         "Throughput over Group Count, Bars per Row Count, best in class\n" 
-        + f"merge criterium: difference of logs < {split_diff:.5f}\n"
+        + f"merge criterium: difference" 
+        + (" of logs" if logscale else "") 
+        + f" < {split_diff:.5f}\n"
     )
     by_row_count = classify(data, ROW_COUNT_COL)
     n_row_counts = len(by_row_count)
@@ -301,12 +308,12 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data):
         for rc, ap_vals_of_rc in approach_vals_by_row_count.items():
             ap_vals_of_rc.sort(key=lambda ap_tp_tup: ap_tp_tup[1])
             # group approaches differing very little so we can split the bar
-            last_base_val_log = math.log(ap_vals_of_rc[0][1], 10)
+            last_base_val_log = transform(ap_vals_of_rc[0][1])
             last_base_idx = 0
             ap_groups_of_rc = []
             for i in range(0, len(ap_vals_of_rc)):
                 next_in_bounds = (i+1 < len(ap_vals_of_rc))
-                val_log = 0 if not next_in_bounds else math.log(ap_vals_of_rc[i+1][1], log_base)
+                val_log = 0 if not next_in_bounds else transform(ap_vals_of_rc[i+1][1])
                 if (
                     not next_in_bounds
                     or (val_log - last_base_val_log) >= split_diff
@@ -375,8 +382,13 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data):
     ax.set_xticks(range(0, len(bar_count_per_group_count)))
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
-    ax.set_yscale("log", basey=log_base)
-    plt.savefig(f"throughput_over_group_size_barring_row_count_stacking_approaches.png")
+    if logscale:
+        ax.set_yscale("log", basey=log_base)
+    plt.savefig(
+        f"throughput_over_group_size_barring_row_count_stacking_approaches" 
+        + ("_log" if logscale else "") 
+        + ".png"
+    )
 
 
 def read_csv(path):
@@ -426,7 +438,8 @@ def main():
     throughput_over_group_count(data)
     throughput_over_stream_count(data, 32)
     runtime_over_group_size_barring_approaches_stacking_row_count(data)
-    throughput_over_group_size_barring_row_count_stacking_approaches(data)
+    throughput_over_group_size_barring_row_count_stacking_approaches(data, True)
+    throughput_over_group_size_barring_row_count_stacking_approaches(data, False)
 
 if __name__ == "__main__":
     main()
