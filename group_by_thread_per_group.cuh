@@ -83,10 +83,6 @@ __global__ void kernel_thread_per_group_more_groups(
 
     size_t base_idx =
         (size_t)blockIdx.x * blockDim.x + stream_idx * blockDim.x * gridDim.x;
-    // because of our whacky exit condition on the loop below
-    // (rows_read  == blockDim.x)
-    // this case would not be detected otherwise
-    if (base_idx >= input.row_count) return;
 
     size_t idx = threadIdx.x + base_idx;
     size_t stride = (size_t)blockDim.x * gridDim.x * stream_count;

@@ -7,7 +7,7 @@
 #include <iomanip>
 
 #define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_THREAD_PER_GROUP false
+#define ENABLE_APPROACH_THREAD_PER_GROUP true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -31,7 +31,7 @@ const size_t benchmark_stream_count_variants[] = {0, 1, 2,
                                                   4, 8, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {0, 2, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 #endif
 
 #if BIG_DATA
@@ -40,14 +40,14 @@ const size_t benchmark_stream_count_variants[] = {0, 2, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     2, 4, 16, 32, 128, 1024, 16384, BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 20)
 const size_t benchmark_row_count_variants[] = {128, 4096, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {32, 128, 256};
+const int benchmark_gpu_block_dim_variants[] = {128};
 #endif
 
 #if BIG_DATA
@@ -90,6 +90,8 @@ struct bench_data {
         std::ofstream output_csv;
     };
 
+    cudaDeviceProp device_properties;
+
     db_table input_cpu;
     db_table output_cpu;
 
@@ -126,6 +128,11 @@ void free_db_table_cpu(db_table* t)
 
 void alloc_bench_data(bench_data* bd)
 {
+    int dc;
+    cudaGetDeviceCount(&dc);
+    RELASE_ASSERT(dc == 1);
+    cudaGetDeviceProperties(&bd->device_properties, 0);
+
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
         RELASE_ASSERT((new (&bd->expected_output[rcv])
                            std::unordered_map<uint64_t, uint64_t>()));
@@ -143,8 +150,9 @@ void alloc_bench_data(bench_data* bd)
     CUDA_TRY(cudaEventCreate(&bd->end_event));
 
     gpu_data_alloc(&bd->data_gpu, BENCHMARK_ROWS_MAX, BENCHMARK_GROUPS_MAX);
+
 #if ENABLE_APPROACH_HASHTABLE
-    group_by_hashtable_init(BENCHMARK_ROWS_MAX);
+    group_by_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     group_by_thread_per_group_init();
