@@ -10,6 +10,7 @@
 #define ENABLE_APPROACH_HASHTABLE true
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_THREAD_PER_GROUP true
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -21,6 +22,10 @@
 
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
 #include "group_by_shared_mem_hashtable.cuh"
+#endif
+
+#if ENABLE_APPROACH_CUB_RADIX_SORT
+#include "group_by_cub_radix_sort.cuh"
 #endif
 
 // set to false to reduce data size for debugging
@@ -166,10 +171,16 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
+#if ENABLE_APPROACH_CUB_RADIX_SORT
+    group_by_cub_radix_sort_init(BENCHMARK_ROWS_MAX);
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
+#if ENABLE_APPROACH_CUB_RADIX_SORT
+    group_by_cub_radix_sort_fin();
+#endif
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_fin();
 #endif
@@ -371,6 +382,18 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "shared_mem_hashtable");
+    }
+#endif
+
+#if ENABLE_APPROACH_CUB_RADIX_SORT
+    if (approach_cub_radix_sort_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        group_by_cub_radix_sort<GROUP_BIT_COUNT>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "cub_radix_sort");
     }
 #endif
 }

@@ -30,6 +30,7 @@ approach_colors = {
     "hashtable_lazy_out_idx": "green",
     "thread_per_group": "deepskyblue",
     "shared_mem_hashtable": "purple",
+    "cub_radix_sort": "turquoise"
 }
 approach_markers = {
     "hashtable": "^",
@@ -37,6 +38,7 @@ approach_markers = {
     "hashtable_lazy_out_idx": "*",
     "thread_per_group": "x",
     "shared_mem_hashtable": ">",
+    "cub_radix_sort": "o"
 }
 
 
