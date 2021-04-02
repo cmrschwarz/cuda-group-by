@@ -9,7 +9,7 @@
 #define GROUP_HT_EMPTY_VALUE 0
 
 __device__ size_t group_ht_groups_found = 0;
-__device__ bool empty_group_used = false;
+__device__ bool group_ht_empty_group_used = false;
 // since other approaches reuse the hashtable from this we have to avoid
 // multi initialization
 static bool group_ht_initialized = false;
@@ -86,7 +86,7 @@ __device__ void group_ht_insert(
     group_ht_entry<EAGER_OUT_IDX>* hte;
     if (group == GROUP_HT_EMPTY_VALUE) {
         hte = &hashtable[0];
-        empty_group_used = true;
+        group_ht_empty_group_used = true;
     }
     else {
         size_t hash = group & GROUPS_MASK;
@@ -153,7 +153,7 @@ __global__ void kernel_write_out_group_ht(
     int stride = blockDim.x * gridDim.x * stream_count;
     if (tid == 0) {
         group_ht_entry<EAGER_OUT_IDX>* hte = &hashtable[0];
-        if (empty_group_used) {
+        if (group_ht_empty_group_used) {
             size_t idx;
             if (EAGER_OUT_IDX) {
                 // if the EMPTY_VAL group actually occured, increment groups
@@ -167,7 +167,7 @@ __global__ void kernel_write_out_group_ht(
             output.group_col[idx] = GROUP_HT_EMPTY_VALUE;
             output.aggregate_col[idx] = hte->aggregate;
             hte->aggregate = 0;
-            empty_group_used = false;
+            group_ht_empty_group_used = false;
         }
         tid += stride;
     }

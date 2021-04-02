@@ -1,4 +1,5 @@
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <random>
 #include <limits>
@@ -7,6 +8,7 @@
 #include <iomanip>
 
 #define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_THREAD_PER_GROUP true
 
 #if ENABLE_APPROACH_HASHTABLE
@@ -15,6 +17,10 @@
 
 #if ENABLE_APPROACH_THREAD_PER_GROUP
 #include "group_by_thread_per_group.cuh"
+#endif
+
+#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+#include "group_by_shared_mem_hashtable.cuh"
 #endif
 
 // set to false to reduce data size for debugging
@@ -157,15 +163,21 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     group_by_thread_per_group_init();
 #endif
+#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+    group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
-#if ENABLE_APPROACH_HASHTABLE
-    group_by_hashtable_fin();
+#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+    group_by_shared_mem_hashtable_fin();
 #endif
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     group_by_thread_per_group_fin();
+#endif
+#if ENABLE_APPROACH_HASHTABLE
+    group_by_hashtable_fin();
 #endif
 
     gpu_data_free(&bd->data_gpu);
@@ -278,8 +290,21 @@ bool validate(bench_data* bd, int row_count_variant)
     if (bd->output_cpu.row_count != expected_output_row_count) {
         fprintf(
             stderr,
-            "validation failiure: expected %llu different groups, got %llu\n",
+            "validation failiure: expected %llu different groups, got "
+            "%llu\n",
             expected_output_row_count, bd->output_cpu.row_count);
+        if (bd->output_cpu.row_count < expected_output_row_count) {
+            std::unordered_set<uint64_t> occured_groups;
+            for (size_t i = 0; i < bd->output_cpu.row_count; i++) {
+                occured_groups.insert(bd->output_cpu.group_col[i]);
+            }
+            for (auto it = bd->expected_output[row_count_variant].begin();
+                 it != bd->expected_output[row_count_variant].end(); ++it) {
+                if (occured_groups.find(it->first) == occured_groups.end()) {
+                    fprintf(stderr, "missing expected group %llu\n", it->first);
+                }
+            }
+        }
         __builtin_trap();
         return false;
     }
@@ -329,13 +354,23 @@ void run_approaches(
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     if (approach_thread_per_group_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-
         group_by_thread_per_group<GROUP_BIT_COUNT>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "thread_per_group");
+    }
+#endif
+#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+    if (approach_shared_mem_hashtable_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        group_by_shared_mem_hashtable<GROUP_BIT_COUNT>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "shared_mem_hashtable");
     }
 #endif
 }
