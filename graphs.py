@@ -270,10 +270,18 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
     else:
         transform = lambda x: x
 
-    graph_height = (
-        transform(max_col_val(data, THROUGHPUT_COL))
-        - transform(min_col_val(data, THROUGHPUT_COL))
-    )
+    graph_max_value = max_col_val(data, THROUGHPUT_COL)
+    graph_min_value = min_col_val(data, THROUGHPUT_COL)
+    # increase space at the top so the row count labels don't overflow 
+    if logscale:
+        graph_max_value *= 10**(0.5 * math.log(graph_max_value, log_base))
+    else:
+        graph_max_value *= 1.2  
+
+
+ 
+    graph_height = (transform(graph_max_value) - transform(graph_min_value))
+    text_offset = 0.01
     split_diff = 0.01 * graph_height
     ax.set_title(
         "Throughput over Group Count, Bars per Row Count, best in class\n" 
@@ -377,19 +385,23 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
         )
     for gc, approach_vals_by_row_count in chart_data_per_group_count:
         for rc_index, (rc, ap_vals_of_rc) in enumerate(sorted(approach_vals_by_row_count.items())):
-            plt.annotate(
-                str(rc), ha='center', va='bottom',
-                xy=(
-                    0.5 * bar_gap +
-                    bar_index_per_group_count[gc] + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * (bar_width + bar_gap),
-                    ap_vals_of_rc[-1][1]
-                )
+            xpos = (
+                0.5 * bar_gap + bar_index_per_group_count[gc] 
+                + (rc_index - bar_count_per_group_count[gc] / 2. + 0.5) * (bar_width + bar_gap)
             )
+            ypos = ap_vals_of_rc[-1][1] 
+            if logscale:
+                ypos *= 10**(text_offset * math.log(graph_max_value, log_base))
+            else:
+                ypos += text_offset * graph_max_value
+
+            plt.annotate(str(rc), ha='center', va='bottom', rotation=90, xy=(xpos, ypos))
     ax.set_xticks(range(0, len(bar_count_per_group_count)))
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
-    ax.legend()
     if logscale:
         ax.set_yscale("log", basey=log_base)
+    ax.set_ylim(top=graph_max_value)
+    ax.legend()
     plt.savefig(
         f"throughput_over_group_size_barring_row_count_stacking_approaches" 
         + ("_log" if logscale else "") 
