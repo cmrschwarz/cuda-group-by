@@ -2,5 +2,5 @@
 .vscode
 /temp.cu
 /a.out
-/bench.csv
+/bench*.csv
 /graphs

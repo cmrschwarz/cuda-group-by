@@ -30,7 +30,8 @@ approach_colors = {
     "hashtable_lazy_out_idx": "green",
     "thread_per_group": "deepskyblue",
     "shared_mem_hashtable": "purple",
-    "cub_radix_sort": "turquoise"
+    "cub_radix_sort": "turquoise",
+    "throughput_test": "gray"
 }
 approach_markers = {
     "hashtable": "^",
@@ -38,7 +39,8 @@ approach_markers = {
     "hashtable_lazy_out_idx": "*",
     "thread_per_group": "x",
     "shared_mem_hashtable": ">",
-    "cub_radix_sort": "o"
+    "cub_radix_sort": "o",
+    "throughput_test": "+"
 }
 
 
@@ -86,6 +88,12 @@ def col_vals_l(rows, col):
 
 def col_vals(rows, col):
     return list(col_vals_l(rows, col))
+
+def unique_col_vals(rows, col):
+    results = {}
+    for r in rows:
+        results[r[col]] = True
+    return list(results.keys())
 
 def col_average(rows, col):
     return sum(col_vals_l(rows, col)) / len(rows)
@@ -150,6 +158,7 @@ def throughput_over_group_count(data):
             markerfacecolor='none',
             label=f"{approach}, (gd,bd,sc) = {best_line_class}")
     ax.set_xscale("log", basex=2)
+    ax.set_xticks(unique_col_vals(data, GROUP_COUNT_COL))
     #ax.set_yscale("log", basey=2)
     ax.set_ylim(0)
     ax.legend()
@@ -180,8 +189,8 @@ def throughput_over_stream_count(data, group_count):
             color=approach_colors[approach],
             markerfacecolor='none',
             label=f"{approach}, (gd,bd) = {best_line_class}")
-
-    ax.set_xscale("log", basex=2)
+    
+    ax.set_xticks(unique_col_vals(data, STREAM_COUNT_COL))
     ax.set_ylim(0)
     ax.legend()
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
@@ -312,11 +321,11 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
 
         by_approaches = sorted(classify(gc_rows, APPROACH_COL).items())
         for (ap, ap_rows) in by_approaches:
-            by_row_count = classify(ap_rows, ROW_COUNT_COL)
+            ap_by_row_count = classify(ap_rows, ROW_COUNT_COL)
             # fixed approach, row count and group count
             # averaged iterations
             # --> best in class over grid dim, block dim and stream count  
-            for rc, row in highest_in_class(by_row_count, THROUGHPUT_COL).items():
+            for rc, row in highest_in_class(ap_by_row_count, THROUGHPUT_COL).items():
                 approach_vals_by_row_count[rc].append((ap, row[THROUGHPUT_COL]))
         # sort approaches for each row count -> bar
         for rc, ap_vals_of_rc in approach_vals_by_row_count.items():

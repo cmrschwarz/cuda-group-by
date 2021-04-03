@@ -11,6 +11,7 @@
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_THREAD_PER_GROUP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -26,6 +27,10 @@
 
 #if ENABLE_APPROACH_CUB_RADIX_SORT
 #include "group_by_cub_radix_sort.cuh"
+#endif
+
+#if ENABLE_APPROACH_THROUGHPUT_TEST
+#include "throughput_test.cuh"
 #endif
 
 // set to false to reduce data size for debugging
@@ -58,8 +63,9 @@ const size_t benchmark_row_count_variants[] = {32,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 20)
-const size_t benchmark_row_count_variants[] = {128, 4096, BENCHMARK_ROWS_MAX};
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 24)
+const size_t benchmark_row_count_variants[] = {
+    128, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
@@ -78,7 +84,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
 #else
-#define BENCHMARK_GROUP_BITS_MAX 20
+#define BENCHMARK_GROUP_BITS_MAX 16
 #endif
 
 #if BIG_DATA
@@ -182,10 +188,16 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_CUB_RADIX_SORT
     group_by_cub_radix_sort_init(BENCHMARK_ROWS_MAX);
 #endif
+#if ENABLE_APPROACH_THROUGHPUT_TEST
+    throughput_test_init();
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
+#if ENABLE_APPROACH_THROUGHPUT_TEST
+    throughput_test_fin();
+#endif
 #if ENABLE_APPROACH_CUB_RADIX_SORT
     group_by_cub_radix_sort_fin();
 #endif
@@ -332,12 +344,16 @@ bool validate(bench_data* bd, int row_count_variant)
 
 void record_time_and_validate(
     bench_data* bd, int group_count, int row_count_variant, int grid_dim,
-    int block_dim, int stream_count, int iteration, const char* approach_name)
+    int block_dim, int stream_count, int iteration, const char* approach_name,
+    bool no_validate = false)
 {
     CUDA_TRY(cudaEventSynchronize(bd->end_event));
+    CUDA_TRY(cudaDeviceSynchronize());
     float time;
     CUDA_TRY(cudaEventElapsedTime(&time, bd->start_event, bd->end_event));
-    RELASE_ASSERT(validate(bd, row_count_variant));
+    if (!no_validate) {
+        RELASE_ASSERT(validate(bd, row_count_variant));
+    }
     // the flush on std::endl is intentional to allow for tail -f style
     // status inspections
     bd->output_csv << approach_name << ";" << group_count << ";"
@@ -353,6 +369,7 @@ void run_approaches(
 {
     constexpr size_t GROUP_COUNT = (1 << GROUP_BIT_COUNT);
     size_t row_count = benchmark_row_count_variants[row_count_variant];
+
 #if ENABLE_APPROACH_HASHTABLE
     if (approach_hashtable_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
@@ -370,6 +387,7 @@ void run_approaches(
             stream_count, iteration, "hashtable_lazy_out_idx");
     }
 #endif
+
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     if (approach_thread_per_group_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
@@ -381,6 +399,7 @@ void run_approaches(
             stream_count, iteration, "thread_per_group");
     }
 #endif
+
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     if (approach_shared_mem_hashtable_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
@@ -402,6 +421,18 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "cub_radix_sort");
+    }
+#endif
+
+#if ENABLE_APPROACH_THROUGHPUT_TEST
+    if (approach_throughput_test_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        throughput_test<GROUP_BIT_COUNT>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "throughput_test", true);
     }
 #endif
 }
