@@ -90,13 +90,15 @@ def col_vals(rows, col):
 def col_average(rows, col):
     return sum(col_vals_l(rows, col)) / len(rows)
 
-def average_col(rows, col):
+def average_columns(rows, cols):
     class_cols = list(COLUMNS)
-    class_cols.remove(col)
+    for c in cols:
+        class_cols.remove(c)
     output_rows = []
     for row_group in classify_mult(rows, class_cols).values():
         row = row_group[0]
-        row[col] = col_average(row_group, col)
+        for c in cols:
+            row[c] = col_average(row_group, c)
         output_rows.append(row)
     return output_rows
 
@@ -435,7 +437,7 @@ def main():
     data = read_csv(input_path)
 
     # average runs since we basically always need this
-    data = average_col(data, ITERATION_COL)
+    data = average_columns(data, [ITERATION_COL, THROUGHPUT_COL, TIME_MS_COL])
 
     #generate graphs
     os.chdir(output_path)
