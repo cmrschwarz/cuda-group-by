@@ -49,25 +49,15 @@ void group_by_cub_radix_sort_fin()
 }
 
 static inline bool approach_cub_radix_sort_available(
-    int group_bits, int row_count, int grid_size, int block_size,
+    int group_bits, int row_count, int grid_dim, int block_dim,
     int stream_count)
 {
-    static bool grid_block_values_locked = false;
-    static int locked_in_grid_size;
-    static int locked_in_block_size;
-    if (!grid_block_values_locked) {
-        grid_block_values_locked = true;
-        locked_in_grid_size = grid_size;
-        locked_in_block_size = block_size;
-        return true;
-    }
-    return grid_size == locked_in_grid_size &&
-           block_size == locked_in_block_size && stream_count == 0;
+    return grid_dim == 0 && block_dim == 0 && stream_count == 0;
 }
 
 template <int MAX_GROUP_BITS>
 void group_by_cub_radix_sort(
-    gpu_data* gd, int grid_size, int block_size, int stream_count,
+    gpu_data* gd, int grid_dim, int block_dim, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {

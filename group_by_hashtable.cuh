@@ -192,15 +192,16 @@ __global__ void kernel_write_out_group_ht(
 }
 
 static inline bool approach_hashtable_available(
-    int group_bits, int row_count, int grid_size, int block_size,
+    int group_bits, int row_count, int grid_dim, int block_dim,
     int stream_count)
 {
+    if (!grid_dim || !block_dim) return false;
     return true;
 }
 
 template <int MAX_GROUP_BITS, bool EAGER_OUT_IDX>
 void group_by_hashtable(
-    gpu_data* gd, int grid_size, int block_size, int stream_count,
+    gpu_data* gd, int grid_dim, int block_dim, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
@@ -215,7 +216,7 @@ void group_by_hashtable(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         kernel_fill_group_ht<MAX_GROUP_BITS, EAGER_OUT_IDX>
-            <<<grid_size, block_size, 0, stream>>>(
+            <<<grid_dim, block_dim, 0, stream>>>(
                 gd->input, group_ht_entry<EAGER_OUT_IDX>::table,
                 actual_stream_count, i);
         // if we have only one stream there is no need for waiting events
@@ -232,7 +233,7 @@ void group_by_hashtable(
             }
         }
         kernel_write_out_group_ht<MAX_GROUP_BITS, EAGER_OUT_IDX>
-            <<<grid_size, block_size, 0, stream>>>(
+            <<<grid_dim, block_dim, 0, stream>>>(
                 gd->output, group_ht_entry<EAGER_OUT_IDX>::table,
                 actual_stream_count, i);
     }

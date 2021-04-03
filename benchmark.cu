@@ -63,16 +63,16 @@ const size_t benchmark_row_count_variants[] = {128, 4096, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
-const int benchmark_gpu_block_dim_variants[] = {32, 64, 128, 256, 512, 1024};
+const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {128};
+const int benchmark_gpu_block_dim_variants[] = {0, 128};
 #endif
 
 #if BIG_DATA
-const int benchmark_gpu_grid_dim_variants[] = {1,   8,   16,  32,  64,
-                                               128, 256, 512, 1024};
+const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128, 256,
+                                               512, 1024, 2048, 4096};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {128, 512};
+const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
 
 #if BIG_DATA

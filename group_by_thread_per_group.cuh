@@ -33,22 +33,15 @@ static inline void group_by_thread_per_group_fin()
 }
 
 static inline bool approach_thread_per_group_available(
-    int group_bits, int row_count, int grid_size, int block_size,
+    int group_bits, int row_count, int grid_dim, int block_dim,
     int stream_count)
 {
-    /*
-    //DEBUG
-    if (group_bits != 10 || row_count != 65536 || grid_size != 1024 ||
-           block_size != 1024 || stream_count != 0)
-           return false;
-    if (TPG_DEBUG_ONCE) return false;
-    */
-
+    if (!grid_dim || !block_dim) return false;
     const size_t group_count = (1 << group_bits);
     if (group_count > TPG_MAX_GROUPS) return false;
-    if (group_count < block_size) return false;
-    if (block_size < TPG_MIN_BLOCK_DIM) return false;
-    if (block_size > TPG_MAX_BLOCK_DIM) return false;
+    if (group_count < block_dim) return false;
+    if (block_dim < TPG_MIN_BLOCK_DIM) return false;
+    if (block_dim > TPG_MAX_BLOCK_DIM) return false;
     return true;
 }
 
@@ -332,13 +325,13 @@ struct group_based_kernel_dispatch<MAX_GROUPS, false> {
 
 template <int MAX_GROUP_BITS>
 void group_by_thread_per_group(
-    gpu_data* gd, int grid_size, int block_size, int stream_count,
+    gpu_data* gd, int grid_dim, int block_dim, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
     constexpr size_t MAX_GROUPS = (size_t)1 << MAX_GROUP_BITS;
     assert(approach_thread_per_group_available(
-        MAX_GROUP_BITS, gd->input.row_count, grid_size, block_size,
+        MAX_GROUP_BITS, gd->input.row_count, grid_dim, block_dim,
         stream_count));
     int actual_stream_count = stream_count ? stream_count : 1;
 
@@ -356,7 +349,7 @@ void group_by_thread_per_group(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         group_based_kernel_dispatch<MAX_GROUPS>::call(
-            grid_size, block_size, stream, gd->input, gd->output,
+            grid_dim, block_dim, stream, gd->input, gd->output,
             actual_stream_count, i);
     }
     kernel_thread_per_group_insert_empty_group<<<1, 1>>>(gd->output);

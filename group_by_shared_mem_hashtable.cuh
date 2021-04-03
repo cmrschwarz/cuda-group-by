@@ -21,9 +21,10 @@ static inline void group_by_shared_mem_hashtable_fin()
 }
 
 static inline bool approach_shared_mem_hashtable_available(
-    int group_bits, int row_count, int grid_size, int block_size,
+    int group_bits, int row_count, int grid_dim, int block_dim,
     int stream_count)
 {
+    if (!grid_dim || !block_dim) return false;
     return group_bits <= (SHARED_MEM_HT_MAX_BITS - SHARED_MEM_HT_OVERSIZE_BITS);
 }
 
@@ -104,7 +105,7 @@ __global__ void kernel_shared_mem_ht(
 
 template <int MAX_GROUP_BITS>
 void group_by_shared_mem_hashtable(
-    gpu_data* gd, int grid_size, int block_size, int stream_count,
+    gpu_data* gd, int grid_dim, int block_dim, int stream_count,
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
@@ -121,7 +122,7 @@ void group_by_shared_mem_hashtable(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         kernel_shared_mem_ht<MAX_GROUP_BITS>
-            <<<grid_size, block_size, 0, stream>>>(
+            <<<grid_dim, block_dim, 0, stream>>>(
                 gd->input, group_ht_entry<false>::table, actual_stream_count,
                 i);
         // if we have only one stream there is no need for waiting events
@@ -129,9 +130,9 @@ void group_by_shared_mem_hashtable(
     }
     // since it's likely that our block / grid dims are overkill
     // for the write out kernel we reduce them a bit
-    if (block_size * grid_size * stream_count > MAX_GROUPS) {
-        grid_size = MAX_GROUPS / (stream_count * block_size);
-        if (!grid_size) grid_size = 1;
+    if (block_dim * grid_dim * stream_count > MAX_GROUPS) {
+        grid_dim = MAX_GROUPS / (stream_count * block_dim);
+        if (!grid_dim) grid_dim = 1;
     }
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
@@ -144,7 +145,7 @@ void group_by_shared_mem_hashtable(
             }
         }
         kernel_write_out_group_ht<MAX_GROUP_BITS, false>
-            <<<grid_size, block_size, 0, stream>>>(
+            <<<grid_dim, block_dim, 0, stream>>>(
                 gd->output, group_ht_entry<false>::table, actual_stream_count,
                 i);
     }
