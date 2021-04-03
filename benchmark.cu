@@ -9,7 +9,7 @@
 
 #define ENABLE_APPROACH_HASHTABLE true
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_THREAD_PER_GROUP true
+#define ENABLE_APPROACH_THREAD_PER_GROUP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 
 #if ENABLE_APPROACH_HASHTABLE
@@ -48,8 +48,15 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 #if BIG_DATA
 // 2^27, 8 Byte per entry -> 1 GiB per stored column
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
-const size_t benchmark_row_count_variants[] = {
-    2, 4, 16, 32, 128, 1024, 16384, BENCHMARK_ROWS_MAX};
+const size_t benchmark_row_count_variants[] = {32,
+                                               128,
+                                               1024,
+                                               16384,
+                                               131072,
+                                               1048576,
+                                               BENCHMARK_ROWS_MAX / 4,
+                                               BENCHMARK_ROWS_MAX / 2,
+                                               BENCHMARK_ROWS_MAX};
 #else
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 20)
 const size_t benchmark_row_count_variants[] = {128, 4096, BENCHMARK_ROWS_MAX};
@@ -62,7 +69,8 @@ const int benchmark_gpu_block_dim_variants[] = {128};
 #endif
 
 #if BIG_DATA
-const int benchmark_gpu_grid_dim_variants[] = {1, 8, 64, 128, 256, 512, 1024};
+const int benchmark_gpu_grid_dim_variants[] = {1,   8,   16,  32,  64,
+                                               128, 256, 512, 1024};
 #else
 const int benchmark_gpu_grid_dim_variants[] = {128, 512};
 #endif
@@ -70,7 +78,7 @@ const int benchmark_gpu_grid_dim_variants[] = {128, 512};
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
 #else
-#define BENCHMARK_GROUP_BITS_MAX 10
+#define BENCHMARK_GROUP_BITS_MAX 20
 #endif
 
 #if BIG_DATA
@@ -438,6 +446,8 @@ int main()
     run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<16>(&bench_data);
+    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX - 1>(
+        &bench_data);
 #endif
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();

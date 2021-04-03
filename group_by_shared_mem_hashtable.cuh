@@ -32,8 +32,13 @@ __global__ void kernel_shared_mem_ht(
     db_table input, group_ht_entry<false>* hashtable, int stream_count,
     int stream_idx)
 {
+    // the ternary guards against template instantiations that would
+    // cause ptxas error during compilations by requiring
+    // too much shared memory even if these instantiations are never used
     constexpr size_t SHARED_MEM_HT_CAPACITY =
-        (size_t)1 << (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS);
+        (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS > SHARED_MEM_HT_MAX_BITS)
+            ? 1
+            : (size_t)1 << (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS);
     constexpr size_t SHARED_MEM_HT_MASK = SHARED_MEM_HT_CAPACITY - 1;
 
     __shared__ bool empty_group_used;

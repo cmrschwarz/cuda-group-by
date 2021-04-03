@@ -1,6 +1,11 @@
 #pragma once
-#include "./deps/cub/cub/cub.cuh"
+
 #include "cuda_group_by.cuh"
+
+// Disable the "dynamic initialization in unreachable code" warning message
+// thrown inside from inside cub
+#pragma diag_suppress initialization_not_reachable
+#include "./deps/cub/cub/cub.cuh"
 
 static void* cub_radix_sort_temp_storage;
 static size_t cub_radix_sort_temp_storage_size;
@@ -68,6 +73,7 @@ void group_by_cub_radix_sort(
 {
 
     CUDA_TRY(cudaEventRecord(start_event));
+
     cub::DeviceRadixSort::SortPairs(
         cub_radix_sort_temp_storage, cub_radix_sort_temp_storage_size,
         gd->input.group_col, cub_radix_sort_sorted_group_col,

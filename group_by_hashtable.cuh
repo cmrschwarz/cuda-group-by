@@ -204,7 +204,6 @@ void group_by_hashtable(
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
-    constexpr size_t MAX_GROUPS = 1 << MAX_GROUP_BITS;
     CUDA_TRY(cudaEventRecord(start_event));
     // reset number of groups found
     size_t zero = 0;
@@ -221,12 +220,6 @@ void group_by_hashtable(
                 actual_stream_count, i);
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
-    }
-    // since it's likely that our block / grid dims are overkill
-    // for the write out kernel we reduce them a bit
-    if (block_size * grid_size * stream_count > MAX_GROUPS) {
-        grid_size = MAX_GROUPS / (stream_count * block_size);
-        if (!grid_size) grid_size = 1;
     }
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
