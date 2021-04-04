@@ -32,15 +32,19 @@ approach_colors = {
     "hashtable_eager_out_idx": "lightblue",
     "hashtable_lazy_out_idx": "green",
     "thread_per_group": "deepskyblue",
+    "thread_per_group_naive_writeout": "deepskyblue",
+    "thread_per_group_hashmap_writeout": "darkgreen",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
     "throughput_test": "gray"
 }
 approach_markers = {
     "hashtable": "^",
-    "hashtable_eager_out_idx": "+",
-    "hashtable_lazy_out_idx": "*",
+    "hashtable_eager_out_idx": "^",
+    "hashtable_lazy_out_idx": "+",
     "thread_per_group": "x",
+    "thread_per_group_naive_writeout": "+",
+    "thread_per_group_hashmap_writeout": "*",
     "shared_mem_hashtable": ">",
     "cub_radix_sort": "o",
     "throughput_test": "+"

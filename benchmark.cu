@@ -7,11 +7,11 @@
 #include <fstream>
 #include <iomanip>
 
-#define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_THREAD_PER_GROUP false
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_HASHTABLE false
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_THREAD_PER_GROUP true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -84,7 +84,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
 #else
-#define BENCHMARK_GROUP_BITS_MAX 16
+#define BENCHMARK_GROUP_BITS_MAX 10
 #endif
 
 #if BIG_DATA
@@ -180,7 +180,7 @@ void alloc_bench_data(bench_data* bd)
     group_by_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
 #if ENABLE_APPROACH_THREAD_PER_GROUP
-    group_by_thread_per_group_init();
+    group_by_thread_per_group_init(BENCHMARK_GROUPS_MAX);
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
@@ -391,12 +391,18 @@ void run_approaches(
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     if (approach_thread_per_group_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        group_by_thread_per_group<GROUP_BIT_COUNT>(
+        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group");
+            stream_count, iteration, "thread_per_group_naive_writeout");
+        group_by_thread_per_group<GROUP_BIT_COUNT, false>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "thread_per_group_hashmap_writeout");
     }
 #endif
 

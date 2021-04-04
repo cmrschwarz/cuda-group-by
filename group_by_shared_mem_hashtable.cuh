@@ -128,12 +128,6 @@ void group_by_shared_mem_hashtable(
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
-    // since it's likely that our block / grid dims are overkill
-    // for the write out kernel we reduce them a bit
-    if (block_dim * grid_dim * stream_count > MAX_GROUPS) {
-        grid_dim = MAX_GROUPS / (stream_count * block_dim);
-        if (!grid_dim) grid_dim = 1;
-    }
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         if (stream_count > 1) {
