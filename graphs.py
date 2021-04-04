@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 from matplotlib.axes import Axes
 import csv
 import sys
@@ -20,6 +21,8 @@ ITERATION_COL = 6
 TIME_MS_COL = 7
 THROUGHPUT_COL = 8
 COLUMN_COUNT = 9
+#just throughput for now
+VIRTUAL_COLUMN_COUNT = 1
 
 COLUMNS = list(range(0, COLUMN_COUNT))
 
@@ -102,6 +105,7 @@ def average_columns(rows, cols):
     class_cols = list(COLUMNS)
     for c in cols:
         class_cols.remove(c)
+
     output_rows = []
     for row_group in classify_mult(rows, class_cols).values():
         row = row_group[0]
@@ -110,7 +114,11 @@ def average_columns(rows, cols):
         output_rows.append(row)
     return output_rows
 
-
+def class_with_lowest_average(classes, avg_col):
+    return min(
+        classes.items(), 
+        key=lambda kv: col_average(kv[1], avg_col)
+    )[0]
 
 def class_with_highest_average(classes, avg_col):
     return max(
@@ -195,6 +203,66 @@ def throughput_over_stream_count(data, group_count):
     ax.legend()
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
+def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
+    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    ax.set_xlabel("row count")
+    if relative:
+        ax.set_ylabel(f"relative {col_str} standard deviation in percent")
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter())
+    else:
+        ax.set_ylabel(
+            f"{col_str} standard deviation" 
+            + (f" ({col_unit})" if col_unit is not None else "")
+        )
+    groupcount_filtered = filter_col_val(data, GROUP_COUNT_COL, group_count)
+
+    ax.set_title(
+        ("Relative " if relative else "") 
+        + f"{col_str.capitalize()} Standard Deviation over Row Count" 
+        + f" (group_count={group_count}, " 
+        + ("lowest " if minimize else "highest")
+        + " {col_str} in class)"
+    )
+
+    by_approaches = classify(groupcount_filtered, APPROACH_COL)
+
+    for approach, rows in by_approaches.items():
+        classified = classify_mult(rows, [GRID_DIM_COL, BLOCK_DIM_COL, STREAM_COUNT_COL])
+        if minimize:
+            best_class = class_with_lowest_average(classified, col)
+        else:
+            best_class = class_with_highest_average(classified, col)
+
+        by_row_count = classify(classified[best_class], ROW_COUNT_COL)
+        row_counts = sorted(by_row_count.keys())
+        stddevs = []
+        for rc in row_counts:
+            rc_rows = by_row_count[rc]
+            avg = col_average(rc_rows, col)
+            dev = 0
+            for r in rc_rows:
+                dev += (r[col] - avg)**2
+            stddev = math.sqrt(dev / len(rc_rows))
+            if relative:
+                stddev = (stddev / avg) * 100
+            stddevs.append(stddev)
+
+        ax.plot(
+            row_counts,stddevs,
+            marker=approach_markers[approach],
+            color=approach_colors[approach],
+            markerfacecolor='none',
+            label=f"{approach} (gd,bd,sc)={best_class}")
+    
+    ax.set_ylim(0)
+    ax.set_xscale("log", basex=2)
+    ax.set_xticks(unique_col_vals(data, ROW_COUNT_COL))
+    ax.legend()
+    plt.savefig(
+        ("relative_" if relative else "") 
+        + f"{col_str}_stddev_over_row_count_gc{group_count}.png"
+    )
+
 
 def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
@@ -209,7 +277,7 @@ def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     graph_max_value = max_col_val(data, TIME_MS_COL)
     graph_min_value = min_col_val(data, TIME_MS_COL)
     graph_height = math.log(graph_max_value, 10) - math.log(graph_min_value, 10)
-    bar_gap = 0.01 * graph_height
+    bar_gap = 0.005 * graph_height
     bar_count_per_group_count = {}
     bar_index_per_group_count = {}
     i = 0
@@ -423,9 +491,13 @@ def read_csv(path):
     with open(path) as file:
         reader = csv.reader(file, delimiter=';')
         header = next(reader) # skip header
-        # legacy support for benchmarks without iterations 
-        # we need to subtract 2 because of the virtual THROUGHPUT column
-        iters_fix = 0 if len(header) != COLUMN_COUNT - 2 else 1
+        if len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT:
+            iters_fix = 0
+        elif len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT - 1:
+            # legacy support for benchmarks without iterations 
+            iters_fix = 1
+        else:
+            raise ValueError("unexpected column count in " + path)
         
         for csv_row in reader:
             data_row = [None] * COLUMN_COUNT
@@ -458,15 +530,22 @@ def main():
     data = read_csv(input_path)
 
     # average runs since we basically always need this
-    data = average_columns(data, [ITERATION_COL, THROUGHPUT_COL, TIME_MS_COL])
+    data_avg = average_columns(
+        data, 
+        [ITERATION_COL, THROUGHPUT_COL, TIME_MS_COL]
+    )
 
     #generate graphs
     os.chdir(output_path)
-    throughput_over_group_count(data)
-    throughput_over_stream_count(data, 32)
-    runtime_over_group_size_barring_approaches_stacking_row_count(data)
-    throughput_over_group_size_barring_row_count_stacking_approaches(data, True)
-    throughput_over_group_size_barring_row_count_stacking_approaches(data, False)
+    throughput_over_group_count(data_avg)
+    throughput_over_stream_count(data_avg, 32)
+    col_stddev_over_row_count(data, 32, False, False, THROUGHPUT_COL, "throughput", "GiB/s, 16 B per row")
+    col_stddev_over_row_count(data, 32, True, False, THROUGHPUT_COL, "throughput")
+    col_stddev_over_row_count(data, 32, False, True, TIME_MS_COL, "runtime",  "time in ms")
+    col_stddev_over_row_count(data, 32, True, True, TIME_MS_COL, "runtime")
+    runtime_over_group_size_barring_approaches_stacking_row_count(data_avg)
+    throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True)
+    throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False)
 
 if __name__ == "__main__":
     main()
