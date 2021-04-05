@@ -47,7 +47,7 @@ const size_t benchmark_stream_count_variants[] = {0, 1, 2,
                                                   4, 8, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {1, BENCHMARK_STREAMS_MAX};
 #endif
 
 #if BIG_DATA
@@ -63,7 +63,7 @@ const size_t benchmark_row_count_variants[] = {32,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 24)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 20)
 const size_t benchmark_row_count_variants[] = {
     128, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
@@ -71,7 +71,7 @@ const size_t benchmark_row_count_variants[] = {
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {0, 128};
+const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
 #endif
 
 #if BIG_DATA
@@ -391,18 +391,18 @@ void run_approaches(
 #if ENABLE_APPROACH_THREAD_PER_GROUP
     if (approach_thread_per_group_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group_naive_writeout");
         group_by_thread_per_group<GROUP_BIT_COUNT, false>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "thread_per_group_hashmap_writeout");
+        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "thread_per_group_naive_writeout");
     }
 #endif
 
