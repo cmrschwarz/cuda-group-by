@@ -63,9 +63,9 @@ const size_t benchmark_row_count_variants[] = {32,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 20)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
 const size_t benchmark_row_count_variants[] = {
-    128, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+    512, 8192, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
@@ -84,7 +84,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX 20
 #else
-#define BENCHMARK_GROUP_BITS_MAX 10
+#define BENCHMARK_GROUP_BITS_MAX 12
 #endif
 
 #if BIG_DATA
@@ -397,12 +397,12 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "thread_per_group_hashmap_writeout");
-        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
+        /*group_by_thread_per_group<GROUP_BIT_COUNT, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group_naive_writeout");
+            stream_count, iteration, "thread_per_group_naive_writeout");*/
     }
 #endif
 
@@ -474,7 +474,8 @@ int main()
     alloc_bench_data(&bench_data);
     new (&bench_data.output_csv) std::ofstream{"bench.csv"};
     bench_data.output_csv << "approach;groups;rows;grid dim;block dim;stream "
-                             "count; run index; time in ms\n";
+                             "count; run index; time in ms"
+                          << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);

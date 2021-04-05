@@ -8,7 +8,7 @@
 // kernel_thread_per_group_more_groups kernel instead of the
 // more_threads version
 #define CUDA_WARP_SIZE 32
-#define TPG_MIN_GROUPS_FOR_MORE_GROUPS_KERNEL CUDA_WARP_SIZE
+#define TPG_MIN_GROUPS_FOR_MORE_GROUPS_KERNEL (CUDA_WARP_SIZE * 2)
 #define TPG_MIN_BLOCK_DIM 32
 #define TPG_MAX_BLOCK_DIM 1024
 #define TPG_MAX_THREADS_PER_GROUP (TPG_MAX_BLOCK_DIM / 2)
@@ -254,6 +254,9 @@ __global__ void kernel_thread_per_group_more_threads(
         __syncwarp();
         if (!row_handled[threadIdx.x]) {
             int hand_out_to_tid = atomicAdd(&handout_counters[warp_idx], 1);
+            if (hand_out_to_tid >= next_warp_base) {
+                hand_out_to_tid -= CUDA_WARP_SIZE;
+            }
             handout_ids[hand_out_to_tid] = threadIdx.x;
         }
 
@@ -267,20 +270,23 @@ __global__ void kernel_thread_per_group_more_threads(
         // if not, take on responsibility, if yes, yield resp. to the lower tid
         __syncwarp();
         int handout_id = handout_ids[threadIdx.x];
-
+        bool handout_assigned = false;
         if (handout_id != -1) {
-            group_assigned = true;
-            assigned_group = groups[handout_id];
-            for (int i = prev_handout_counter; i < threadIdx.x; i++) {
+            handout_assigned = true;
+            uint64_t handed_out_group = groups[handout_id];
+            int i = prev_handout_counter;
+            while (i != threadIdx.x) {
                 int prev_handout_id = handout_ids[i];
-                if (groups[prev_handout_id] == assigned_group) {
+                if (groups[prev_handout_id] == handed_out_group) {
                     atomicSub(&handout_counters[warp_idx], 1);
                     atomicAdd(
                         (cudaUInt64_t*)&aggregates[prev_handout_id],
                         aggregates[handout_id]);
-                    group_assigned = false;
+                    handout_assigned = false;
                     break;
                 }
+                i++;
+                if (i == next_warp_base) i = warp_base;
             }
         }
 
@@ -288,7 +294,7 @@ __global__ void kernel_thread_per_group_more_threads(
         // we have to do this after the actual yield since
         // other threads may still index based on it during yield detection
         __syncwarp();
-        if (handout_id != -1 && group_assigned == false) {
+        if (handout_id != -1 && handout_assigned == false) {
             handout_ids[threadIdx.x] = -1;
         }
 
@@ -300,12 +306,19 @@ __global__ void kernel_thread_per_group_more_threads(
         int steal_from_tid = -1;
         if (handout_id != -1) {
             new_handout_counter = handout_counters[warp_idx];
-            if (!group_assigned && new_handout_counter > threadIdx.x) {
-                group_assigned = true;
+            if (!handout_assigned && new_handout_counter > threadIdx.x &&
+                !group_assigned) {
+                handout_assigned = true;
+                int handout_priority = 0;
                 // since the lowest tid can't yield, start from the next
-                steal_from_tid = prev_handout_counter + 1;
-                int handout_priority = threadIdx.x - steal_from_tid;
+                for (int i = prev_handout_counter + 1; i < threadIdx.x; i++) {
+                    if (handout_ids[i] == -1) handout_priority++;
+                }
+                steal_from_tid = new_handout_counter;
                 while (true) {
+                    if (steal_from_tid == next_warp_base) {
+                        steal_from_tid = warp_base;
+                    }
                     handout_id = handout_ids[steal_from_tid];
                     if (handout_id != -1) {
                         if (handout_priority == 0) break;
@@ -313,7 +326,6 @@ __global__ void kernel_thread_per_group_more_threads(
                     }
                     steal_from_tid++;
                 }
-                assigned_group = groups[handout_id];
             }
         }
 
@@ -324,22 +336,22 @@ __global__ void kernel_thread_per_group_more_threads(
             handout_ids[threadIdx.x] = handout_id;
         }
 
-        // check if we got stolen from
+        // finally assign group if we weren't stolen from,
         __syncwarp();
-        if (group_assigned && handout_id != -1) {
-            if (handout_ids[threadIdx.x] == -1) {
-                group_assigned = false;
-            }
-            else {
-                handout_ids[threadIdx.x] = -1;
-                assigned_aggregate = aggregates[handout_id];
-            }
+        if (handout_assigned && handout_id != -1 &&
+            handout_ids[threadIdx.x] != -1) {
+            handout_ids[threadIdx.x] = -1;
+            group_assigned = true;
+            assigned_group = groups[handout_id];
+            assigned_aggregate = aggregates[handout_id];
         }
 
         // if the last thread in the warp was assigned a group, advance
         // to the satisfied warp phase
         prev_handout_counter = handout_counters[warp_idx];
-        if (prev_handout_counter == next_warp_base) break;
+        if (prev_handout_counter == next_warp_base) {
+            break;
+        }
     }
 
     // satisfied warp phase
