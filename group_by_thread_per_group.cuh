@@ -202,10 +202,11 @@ __global__ void kernel_thread_per_group_more_threads(
                       (size_t)stream_idx * blockDim.x * gridDim.x;
     size_t idx = threadIdx.x + base_idx;
     size_t stride = (size_t)blockDim.x * gridDim.x * stream_count;
-
-    int warp_idx = threadIdx.x / CUDA_WARP_SIZE;
-    int warp_base = warp_idx * CUDA_WARP_SIZE;
-    int next_warp_base = warp_base + CUDA_WARP_SIZE;
+    // this number is one of {2,4,8,16,32}
+    constexpr int BATCH_SIZE = (1 << MAX_GROUP_BITS);
+    int batch_idx = threadIdx.x / BATCH_SIZE;
+    int batch_base = batch_idx * BATCH_SIZE;
+    int next_batch_base = batch_base + BATCH_SIZE;
     bool group_assigned = false;
     uint64_t assigned_group;
     uint64_t assigned_aggregate;
@@ -213,12 +214,12 @@ __global__ void kernel_thread_per_group_more_threads(
     __shared__ uint64_t aggregates[TPG_MAX_BLOCK_DIM];
     __shared__ bool row_handled[TPG_MAX_BLOCK_DIM];
     __shared__ int handout_ids[TPG_MAX_BLOCK_DIM];
-    __shared__ int handout_counters[TPG_MAX_BLOCK_DIM / CUDA_WARP_SIZE];
+    __shared__ int handout_counters[TPG_MAX_BLOCK_DIM / BATCH_SIZE];
 
     size_t rowcount = input.row_count;
-    int prev_handout_counter = warp_base;
-    if (threadIdx.x == warp_base) {
-        handout_counters[warp_idx] = warp_base;
+    int prev_handout_counter = batch_base;
+    if (threadIdx.x == batch_base) {
+        handout_counters[batch_idx] = batch_base;
     }
     handout_ids[threadIdx.x] = -1;
     __syncwarp();
@@ -238,11 +239,11 @@ __global__ void kernel_thread_per_group_more_threads(
 
         // each thread checks each input to see if it's responsible
         __syncwarp();
-        for (int i = 0; i < CUDA_WARP_SIZE; i++) {
-            if (groups[warp_base + i] == assigned_group) {
+        for (int i = 0; i < BATCH_SIZE; i++) {
+            if (groups[batch_base + i] == assigned_group) {
                 if (group_assigned && base_idx + i < rowcount) {
-                    row_handled[warp_base + i] = true;
-                    assigned_aggregate += aggregates[warp_base + i];
+                    row_handled[batch_base + i] = true;
+                    assigned_aggregate += aggregates[batch_base + i];
                 }
             }
         }
@@ -253,16 +254,16 @@ __global__ void kernel_thread_per_group_more_threads(
         // hand out this group to one of the unassigned threads
         __syncwarp();
         if (!row_handled[threadIdx.x]) {
-            int hand_out_to_tid = atomicAdd(&handout_counters[warp_idx], 1);
-            if (hand_out_to_tid >= next_warp_base) {
-                hand_out_to_tid -= CUDA_WARP_SIZE;
+            int hand_out_to_tid = atomicAdd(&handout_counters[batch_idx], 1);
+            if (hand_out_to_tid >= next_batch_base) {
+                hand_out_to_tid -= BATCH_SIZE;
             }
             handout_ids[hand_out_to_tid] = threadIdx.x;
         }
 
         // check if we have to deal with handouts
         __syncwarp();
-        int new_handout_counter = handout_counters[warp_idx];
+        int new_handout_counter = handout_counters[batch_idx];
         if (new_handout_counter == prev_handout_counter) continue;
 
         // if our thread got handed out a group responsibility,
@@ -278,7 +279,7 @@ __global__ void kernel_thread_per_group_more_threads(
             while (i != threadIdx.x) {
                 int prev_handout_id = handout_ids[i];
                 if (groups[prev_handout_id] == handed_out_group) {
-                    atomicSub(&handout_counters[warp_idx], 1);
+                    atomicSub(&handout_counters[batch_idx], 1);
                     atomicAdd(
                         (cudaUInt64_t*)&aggregates[prev_handout_id],
                         aggregates[handout_id]);
@@ -286,7 +287,7 @@ __global__ void kernel_thread_per_group_more_threads(
                     break;
                 }
                 i++;
-                if (i == next_warp_base) i = warp_base;
+                if (i == next_batch_base) i = batch_base;
             }
         }
 
@@ -305,7 +306,7 @@ __global__ void kernel_thread_per_group_more_threads(
         __syncwarp();
         int steal_from_tid = -1;
         if (handout_id != -1) {
-            new_handout_counter = handout_counters[warp_idx];
+            new_handout_counter = handout_counters[batch_idx];
             if (!handout_assigned && new_handout_counter > threadIdx.x &&
                 !group_assigned) {
                 handout_assigned = true;
@@ -316,8 +317,8 @@ __global__ void kernel_thread_per_group_more_threads(
                 }
                 steal_from_tid = new_handout_counter;
                 while (true) {
-                    if (steal_from_tid == next_warp_base) {
-                        steal_from_tid = warp_base;
+                    if (steal_from_tid == next_batch_base) {
+                        steal_from_tid = batch_base;
                     }
                     handout_id = handout_ids[steal_from_tid];
                     if (handout_id != -1) {
@@ -348,8 +349,8 @@ __global__ void kernel_thread_per_group_more_threads(
 
         // if the last thread in the warp was assigned a group, advance
         // to the satisfied warp phase
-        prev_handout_counter = handout_counters[warp_idx];
-        if (prev_handout_counter == next_warp_base) {
+        prev_handout_counter = handout_counters[batch_idx];
+        if (prev_handout_counter == next_batch_base) {
             break;
         }
     }
@@ -364,10 +365,10 @@ __global__ void kernel_thread_per_group_more_threads(
         }
 
         __syncwarp();
-        for (int i = 0; i < CUDA_WARP_SIZE; i++) {
-            if (groups[warp_base + i] == assigned_group) {
+        for (int i = 0; i < BATCH_SIZE; i++) {
+            if (groups[batch_base + i] == assigned_group) {
                 if (base_idx + i < rowcount) {
-                    assigned_aggregate += aggregates[warp_base + i];
+                    assigned_aggregate += aggregates[batch_base + i];
                 }
             }
         }
@@ -384,7 +385,7 @@ __global__ void kernel_thread_per_group_more_threads(
         }
         __syncthreads();
         if (threadIdx.x % CUDA_WARP_SIZE == 0) {
-            atomicAdd(&groups_found, handout_counters[warp_idx] - warp_base);
+            atomicAdd(&groups_found, handout_counters[batch_idx] - batch_base);
         }
         __syncthreads();
         int empty_group_slot = -1;

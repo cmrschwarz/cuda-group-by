@@ -36,7 +36,7 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA true
+#define BIG_DATA false
 
 #if BIG_DATA
 #define ITERATION_COUNT 4
@@ -61,7 +61,7 @@ const size_t benchmark_row_count_variants[] = {128,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
 const size_t benchmark_row_count_variants[] = {
     512, 8192, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
@@ -482,14 +482,14 @@ int main()
                              "count; run index; time in ms"
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
-    run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
+    run_benchmarks_for_group_bit_count<1>(&bench_data);
+    run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
     run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<16>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX - 1>(
         &bench_data);
