@@ -109,8 +109,6 @@ void group_by_shared_mem_hashtable(
     cudaStream_t* streams, cudaEvent_t* events, cudaEvent_t start_event,
     cudaEvent_t end_event)
 {
-
-    constexpr size_t MAX_GROUPS = 1 << MAX_GROUP_BITS;
     CUDA_TRY(cudaEventRecord(start_event));
     // reset number of groups found
     size_t zero = 0;

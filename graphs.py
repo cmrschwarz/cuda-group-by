@@ -29,19 +29,21 @@ COLUMNS = list(range(0, COLUMN_COUNT))
 #coloring options
 approach_colors = {
     "hashtable": "darkorange",
-    "hashtable_eager_out_idx": "lightblue",
+    "hashtable_eager_out_idx": "darkorange",
     "hashtable_lazy_out_idx": "green",
+    "threads_per_group": "gold",
     "thread_per_group": "deepskyblue",
     "thread_per_group_naive_writeout": "deepskyblue",
     "thread_per_group_hashmap_writeout": "darkgreen",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
-    "throughput_test": "gray"
+    "throughput_test": "lightgray"
 }
 approach_markers = {
     "hashtable": "^",
     "hashtable_eager_out_idx": "^",
     "hashtable_lazy_out_idx": "+",
+    "threads_per_group": "<",
     "thread_per_group": "x",
     "thread_per_group_naive_writeout": "+",
     "thread_per_group_hashmap_writeout": "*",
@@ -225,7 +227,7 @@ def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_st
         + f"{col_str.capitalize()} Standard Deviation over Row Count" 
         + f" (group_count={group_count}, " 
         + ("lowest " if minimize else "highest")
-        + " {col_str} in class)"
+        + f" {col_str} in class)"
     )
 
     by_approaches = classify(groupcount_filtered, APPROACH_COL)

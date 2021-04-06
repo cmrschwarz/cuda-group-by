@@ -7,11 +7,13 @@
 #include <fstream>
 #include <iomanip>
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_THREAD_PER_GROUP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
+
+#define ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT false
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -34,7 +36,7 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 
 #if BIG_DATA
 #define ITERATION_COUNT 4
@@ -42,9 +44,8 @@
 #define ITERATION_COUNT 3
 #endif
 #if BIG_DATA
-#define BENCHMARK_STREAMS_MAX 16
-const size_t benchmark_stream_count_variants[] = {0, 1, 2,
-                                                  4, 8, BENCHMARK_STREAMS_MAX};
+#define BENCHMARK_STREAMS_MAX 8
+const size_t benchmark_stream_count_variants[] = {0, 4, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
 const size_t benchmark_stream_count_variants[] = {1, BENCHMARK_STREAMS_MAX};
@@ -53,12 +54,9 @@ const size_t benchmark_stream_count_variants[] = {1, BENCHMARK_STREAMS_MAX};
 #if BIG_DATA
 // 2^27, 8 Byte per entry -> 1 GiB per stored column
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
-const size_t benchmark_row_count_variants[] = {32,
-                                               128,
-                                               1024,
+const size_t benchmark_row_count_variants[] = {128,
                                                16384,
                                                131072,
-                                               1048576,
                                                BENCHMARK_ROWS_MAX / 4,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
@@ -75,8 +73,7 @@ const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
 #endif
 
 #if BIG_DATA
-const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128, 256,
-                                               512, 1024, 2048, 4096};
+const int benchmark_gpu_grid_dim_variants[] = {0, 32, 64, 128, 256, 512};
 #else
 const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
@@ -396,13 +393,21 @@ void run_approaches(
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group_hashmap_writeout");
-        /*group_by_thread_per_group<GROUP_BIT_COUNT, true>(
+            stream_count, iteration,
+#if ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT
+            "thread_per_group_hashmap_writeout"
+#else
+            "thread_per_group"
+#endif
+        );
+#if ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT
+        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group_naive_writeout");*/
+            stream_count, iteration, "thread_per_group_naive_writeout");
+#endif
     }
 #endif
 
@@ -482,6 +487,8 @@ int main()
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
+    run_benchmarks_for_group_bit_count<3>(&bench_data);
+    run_benchmarks_for_group_bit_count<4>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<16>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX - 1>(
