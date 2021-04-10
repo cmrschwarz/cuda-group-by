@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+#import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 from matplotlib.axes import Axes
@@ -6,6 +7,7 @@ import csv
 import sys
 import os
 import math
+import numpy as np
 
 #constants
 DB_ROW_SIZE_BYTES = 16
@@ -208,6 +210,61 @@ def throughput_over_stream_count(data, group_count):
     ax.set_ylim(0)
     ax.legend()
     plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
+
+
+def grid_dim_block_dim_heatmap(data, group_count, row_count, stream_count, approach):
+    filtered = filter_col_val(data, ROW_COUNT_COL, row_count)
+    filtered = filter_col_val(filtered, GROUP_COUNT_COL, group_count)
+
+    filtered = filter_col_val(filtered, STREAM_COUNT_COL, stream_count)
+    filtered = filter_col_val(filtered, APPROACH_COL, approach)
+
+    classified = classify_mult(filtered, [GRID_DIM_COL, BLOCK_DIM_COL])
+
+    gd_vals, bd_vals = zip(*classified.keys())
+    gd_vals = sorted(dict.fromkeys(gd_vals).keys())
+    # reverse the y axis so the small values are at the bottom
+    bd_vals = sorted(dict.fromkeys(bd_vals).keys(), reverse=True)
+    gd_indices = {v:k for (k,v) in enumerate(gd_vals)}
+    bd_indices = {v:k for (k,v) in enumerate(bd_vals)}
+
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    ax.set_xlabel("grid dim")
+    ax.set_ylabel("block dim")
+    ax.set_title(
+        f"{approach}: throuphput per grid and block dim \n"
+        + f"(group_count = {group_count}, row_count = {row_count}, " 
+        + f"stream_count = {stream_count})\n"
+    )
+ 
+
+    grid = [[0] * len(bd_vals) for i in range(len(gd_vals))]
+    vals = []
+    for (gd, bd), rows in classified.items():
+        tp = col_average(rows, THROUGHPUT_COL)
+        grid[bd_indices[bd]][gd_indices[gd]] = tp
+        vals.append(tp)
+    val_min = min(vals)
+    val_range = max(vals) - val_min
+    for x in range(len(gd_vals)):
+      for y in range(len(bd_vals)):
+          ax.text(
+              x, y, grid[y][x], ha="center", va="center", 
+              color="black" if grid[y][x] < val_min + 0.8 * val_range else "white" 
+          )
+
+
+    im = ax.imshow(np.array(grid), cmap='Reds')
+    ax.set_xticks(range(len(gd_vals)))
+    ax.set_yticks(range(len(bd_vals)))
+
+    ax.set_xticklabels(gd_vals)
+    ax.set_yticklabels(bd_vals)
+    ax.figure.colorbar(im, ax=ax)
+    #plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    #fig.tight_layout()
+    fig.savefig(f"heatmap_{approach}_grid_over_block_dim_gc{group_count}_rc{row_count}_sc{stream_count}.png", bbox_inches="tight")
 
 def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
     _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
@@ -552,6 +609,13 @@ def main():
     runtime_over_group_size_barring_approaches_stacking_row_count(data_avg)
     throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True)
     throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False)
-
+    grid_dim_block_dim_heatmap(
+        data_avg,
+        32,
+        512,
+        min(col_vals(data_avg, STREAM_COUNT_COL)),
+        "shared_mem_hashtable"
+    )
+    
 if __name__ == "__main__":
     main()
