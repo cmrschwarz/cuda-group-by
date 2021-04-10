@@ -150,7 +150,7 @@ def filter_col_val(rows, col, val):
 # graph generators
 
 def throughput_over_group_count(data):
-    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
     max_rowcount = max_col_val(data, ROW_COUNT_COL)
@@ -178,10 +178,10 @@ def throughput_over_group_count(data):
     #ax.set_yscale("log", basey=2)
     ax.set_ylim(0)
     ax.legend()
-    plt.savefig("throughput_over_group_count.png")
+    fig.savefig("throughput_over_group_count.png")
 
 def throughput_over_stream_count(data, group_count):
-    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("stream count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
     max_rowcount = max_col_val(data, ROW_COUNT_COL)
@@ -209,7 +209,7 @@ def throughput_over_stream_count(data, group_count):
     ax.set_xticks(unique_col_vals(data, STREAM_COUNT_COL))
     ax.set_ylim(0)
     ax.legend()
-    plt.savefig(f"throughput_over_stream_count_gc{group_count}.png")
+    fig.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
 
 def grid_dim_block_dim_heatmap(data, group_count, row_count, stream_count, approach):
@@ -267,7 +267,7 @@ def grid_dim_block_dim_heatmap(data, group_count, row_count, stream_count, appro
     fig.savefig(f"heatmap_{approach}_grid_over_block_dim_gc{group_count}_rc{row_count}_sc{stream_count}.png", bbox_inches="tight")
 
 def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
-    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("row count")
     if relative:
         ax.set_ylabel(f"relative {col_str} standard deviation in percent")
@@ -321,14 +321,14 @@ def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_st
     ax.set_xscale("log", basex=2)
     ax.set_xticks(unique_col_vals(data, ROW_COUNT_COL))
     ax.legend()
-    plt.savefig(
+    fig.savefig(
         ("relative_" if relative else "") 
         + f"{col_str}_stddev_over_row_count_gc{group_count}.png"
     )
 
 
 def runtime_over_group_size_barring_approaches_stacking_row_count(data):
-    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("runtime (ms)")
     rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
@@ -396,10 +396,10 @@ def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
     ax.set_yscale("log")
-    plt.savefig(f"throughput_over_group_size_barring_approaches_stacking_row_count.png")
+    fig.savefig(f"throughput_over_group_size_barring_approaches_stacking_row_count.png")
 
 def throughput_over_group_size_barring_row_count_stacking_approaches(data, logscale):
-    _, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
+    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
     #rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
@@ -542,7 +542,7 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
         ax.set_yscale("log", basey=log_base)
     ax.set_ylim(top=graph_max_value)
     ax.legend()
-    plt.savefig(
+    fig.savefig(
         f"throughput_over_group_size_barring_row_count_stacking_approaches" 
         + ("_log" if logscale else "") 
         + ".png"
