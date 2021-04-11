@@ -41,8 +41,9 @@ static inline bool approach_thread_per_group_available(
     int group_bits, int row_count, int grid_dim, int block_dim,
     int stream_count)
 {
-    if (!grid_dim || !block_dim) return false;
     const size_t group_count = (1 << group_bits);
+    // if (group_bits != 8 || row_count != 8192) return false; // DEBUG
+    if (!grid_dim || !block_dim) return false;
     if (group_count > TPG_MAX_GROUPS) return false;
     if (block_dim < TPG_MIN_BLOCK_DIM) return false;
     if (block_dim > TPG_MAX_BLOCK_DIM) return false;
@@ -406,6 +407,216 @@ __global__ void kernel_thread_per_group_more_threads(
 
 template <int MAX_GROUP_BITS, bool NAIVE_WRITEOUT>
 __global__ void kernel_thread_per_group_more_groups(
+    db_table input, db_table output, group_ht_entry<true>* hashtable,
+    int stream_count, int stream_idx)
+{
+    size_t base_idx = (size_t)blockIdx.x * blockDim.x +
+                      (size_t)stream_idx * blockDim.x * gridDim.x;
+    size_t idx = threadIdx.x + base_idx;
+    size_t stride = (size_t)blockDim.x * gridDim.x * stream_count;
+    constexpr int MAX_GROUPS = 1 << MAX_GROUP_BITS;
+    constexpr int MAX_GROUPS_PER_THREAD = MAX_GROUPS / TPG_MIN_BLOCK_DIM;
+    const int RT_MAX_GROUPS_PER_THREAD = MAX_GROUPS / blockDim.x;
+    uint64_t thread_groups[MAX_GROUPS_PER_THREAD];
+    uint64_t thread_aggregates[MAX_GROUPS_PER_THREAD];
+    int thread_group_count = 0;
+
+    __shared__ uint64_t groups[TPG_MAX_BLOCK_DIM];
+    __shared__ uint64_t aggregates[TPG_MAX_BLOCK_DIM];
+    __shared__ bool row_handled[TPG_MAX_BLOCK_DIM];
+    __shared__ int handout_ids[TPG_MAX_BLOCK_DIM];
+    __shared__ int handout_counter;
+
+    size_t rowcount = input.row_count;
+    int prev_handout_counter = 0;
+    if (threadIdx.x == 0) {
+        handout_counter = 0;
+    }
+    handout_ids[threadIdx.x] = -1;
+    __syncthreads();
+
+    // group aquiring phase
+    // some threads in the warp have no unassigned group slots,
+    // must handle the handout
+    while (base_idx < rowcount) {
+        // read input into shared memory, 1 element per thread
+        if (idx < rowcount) {
+            groups[threadIdx.x] = input.group_col[idx];
+            aggregates[threadIdx.x] = input.aggregate_col[idx];
+            row_handled[threadIdx.x] = false;
+        }
+        else {
+            row_handled[threadIdx.x] = true;
+        }
+
+        // each thread checks each input to see if it's responsible
+        __syncthreads();
+        for (int i = 0; i < blockDim.x; i++) {
+            for (int j = 0; j < thread_group_count; j++) {
+                if (groups[i] == thread_groups[j]) {
+                    if (base_idx + i < rowcount) {
+                        row_handled[i] = true;
+                        thread_aggregates[j] += aggregates[i];
+                    }
+                }
+            }
+        }
+        idx += stride;
+        base_idx += stride;
+
+        // if no thread was responsible for the input this thread read in,
+        // hand out this group to one of the unassigned threads
+        __syncthreads();
+        if (!row_handled[threadIdx.x]) {
+            int hand_out_to_tid = atomicAdd(&handout_counter, 1) % blockDim.x;
+            handout_ids[hand_out_to_tid] = threadIdx.x;
+        }
+
+        // check if we have to deal with handouts
+        __syncthreads();
+        if (handout_counter == prev_handout_counter) continue;
+
+        // if our thread got handed out a group responsibility,
+        // check if nobody else before us got assigned the same group
+        // if not, take on responsibility, if yes, yield resp. to the lower tid
+        __syncthreads();
+        int handout_id = handout_ids[threadIdx.x];
+        bool handout_assigned = false;
+        if (handout_id != -1) {
+            handout_assigned = true;
+            uint64_t handed_out_group = groups[handout_id];
+            int i = prev_handout_counter % blockDim.x;
+            while (i != threadIdx.x) {
+                int prev_handout_id = handout_ids[i];
+                if (groups[prev_handout_id] == handed_out_group) {
+                    atomicSub(&handout_counter, 1);
+                    atomicAdd(
+                        (cudaUInt64_t*)&aggregates[prev_handout_id],
+                        aggregates[handout_id]);
+                    handout_assigned = false;
+                    break;
+                }
+                i++;
+                if (i == blockDim.x) i = 0;
+            }
+        }
+
+        // if we yielded, reset up our handout id
+        // we have to do this after the actual yield since
+        // other threads may still index based on it during yield detection
+        __syncthreads();
+        if (handout_id != -1 && handout_assigned == false) {
+            handout_ids[threadIdx.x] = -1;
+        }
+
+        // if we yielded our responsibility to a lower tid, but a higher tid
+        // didn't yield, steal its responsibility
+        // the i'th thread gaining responsibility steals from the i'th non
+        // yielding one
+        __syncthreads();
+        int steal_from_tid = -1;
+        if (handout_id != -1) {
+            int curr_handout_counter = handout_counter;
+            int hci = curr_handout_counter % blockDim.x;
+            if (!handout_assigned &&
+                curr_handout_counter >
+                    thread_group_count * blockDim.x + threadIdx.x &&
+                (thread_group_count < RT_MAX_GROUPS_PER_THREAD)) {
+                handout_assigned = true;
+                int handout_priority = 0;
+                // since the lowest tid can't yield, start from the next
+                int i = (prev_handout_counter + 1) % blockDim.x;
+                while (i != threadIdx.x) {
+                    if (handout_ids[i] == -1) handout_priority++;
+                    i++;
+                    if (i == blockDim.x) i = 0;
+                }
+                steal_from_tid = hci;
+                while (true) {
+                    if (steal_from_tid == blockDim.x) {
+                        steal_from_tid = 0;
+                    }
+                    handout_id = handout_ids[steal_from_tid];
+                    if (handout_id != -1) {
+                        if (handout_priority == 0) break;
+                        handout_priority--;
+                    }
+                    steal_from_tid++;
+                }
+            }
+        }
+
+        // inform the tid that we stole from that it's no longer responsible
+        __syncthreads();
+        if (steal_from_tid != -1) {
+            handout_ids[steal_from_tid] = -1;
+            handout_ids[threadIdx.x] = handout_id;
+        }
+
+        // finally assign group if we weren't stolen from,
+        __syncthreads();
+        if (handout_assigned && handout_id != -1 &&
+            handout_ids[threadIdx.x] != -1) {
+            handout_ids[threadIdx.x] = -1;
+            thread_groups[thread_group_count] = groups[handout_id];
+            thread_aggregates[thread_group_count] = aggregates[handout_id];
+            thread_group_count++;
+        }
+
+        // if the last thread in the warp was assigned a group, advance
+        // to the satisfied warp phase
+        prev_handout_counter = handout_counter;
+        if (prev_handout_counter == MAX_GROUPS) {
+            break;
+        }
+    }
+
+    // satisfied warp phase
+    // every thread has been assigned a group, no need to check anymore
+    while (base_idx < rowcount) {
+        // read input into shared memory, 1 element per thread
+        if (idx < rowcount) {
+            groups[threadIdx.x] = input.group_col[idx];
+            aggregates[threadIdx.x] = input.aggregate_col[idx];
+        }
+
+        __syncthreads();
+        for (int i = 0; i < blockDim.x; i++) {
+            for (int j = 0; j < thread_group_count; j++) {
+                if (groups[i] == thread_groups[j]) {
+                    if (base_idx + i < rowcount) {
+                        thread_aggregates[j] += aggregates[i];
+                    }
+                }
+            }
+        }
+
+        idx += stride;
+        base_idx += stride;
+    }
+
+    // the input is processed, proceed to writeout
+    if (NAIVE_WRITEOUT) {
+        int empty_group_slot = -1;
+        for (int i = 0; i < thread_group_count; i++) {
+            if (thread_groups[i] == TPG_EMPTY_GROUP_VALUE) {
+                empty_group_slot = i;
+            }
+        }
+        thread_per_group_naive_write_out<MAX_GROUP_BITS, false>(
+            output, &handout_counter, thread_group_count, thread_groups,
+            thread_aggregates, empty_group_slot);
+    }
+    else {
+        for (int i = 0; i < thread_group_count; i++) {
+            group_ht_insert<MAX_GROUP_BITS, true>(
+                hashtable, thread_groups[i], thread_aggregates[i]);
+        }
+    }
+}
+
+template <int MAX_GROUP_BITS, bool NAIVE_WRITEOUT>
+__global__ void kernel_thread_per_group_more_groups_old(
     db_table input, db_table output, group_ht_entry<true>* hashtable,
     int stream_count, int stream_idx)
 {

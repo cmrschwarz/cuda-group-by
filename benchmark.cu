@@ -7,13 +7,13 @@
 #include <fstream>
 #include <iomanip>
 
-#define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_HASHTABLE false
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
 #define ENABLE_APPROACH_THREAD_PER_GROUP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
 
-#define ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT false
+#define ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -48,7 +48,7 @@
 const size_t benchmark_stream_count_variants[] = {0, 4, BENCHMARK_STREAMS_MAX};
 #else
 #define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {1, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 #endif
 
 #if BIG_DATA
@@ -61,9 +61,9 @@ const size_t benchmark_row_count_variants[] = {128,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
 const size_t benchmark_row_count_variants[] = {
-    512, 8192, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+    2, 512, 8192, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
