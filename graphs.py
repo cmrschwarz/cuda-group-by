@@ -44,7 +44,7 @@ approach_colors = {
     "hashtable_eager_out_idx": "green",
     "warp_cmp": "gold",
     "block_cmp": "deepskyblue",
-    "block_cmp_old": "lightcoral",
+    "block_cmp_old": "navy",
     "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
@@ -145,6 +145,12 @@ def class_with_highest_average(classes, avg_col):
         key=lambda kv: col_average(kv[1], avg_col)
     )[0]
 
+def highest_class_average(classes, avg_col):
+    return max(
+        [(col_average(rows, avg_col), cl) for (cl, rows) in classes.items()]
+    )
+
+
 def sort_by_col(rows, sort_col):
     return sorted(rows, key=lambda r: r[sort_col])
 
@@ -173,18 +179,22 @@ def throughput_over_group_count(data, log=False):
     by_approaches = classify(rowcount_filtered, APPROACH_COL)
 
     for approach, rows in by_approaches.items():
-        lines = classify_mult(rows, [GRID_DIM_COL, BLOCK_DIM_COL, STREAM_COUNT_COL])
-        best_line_class = class_with_highest_average(lines, THROUGHPUT_COL)
-        best_line = lines[best_line_class]
-        best_line = sort_by_col(best_line, GROUP_COUNT_COL)
-        x = col_vals(best_line, GROUP_COUNT_COL)
-        y = col_vals(best_line, THROUGHPUT_COL)
+        by_group_count = classify(rows, GROUP_COUNT_COL)
+        group_counts = sorted(unique_col_vals(rows, GROUP_COUNT_COL))
+        x = group_counts
+        y = []
+        for gc in group_counts:
+            gc_rows = by_group_count[gc]
+            classes = classify_mult(gc_rows, [ROW_COUNT_COL, GROUP_COUNT_COL, STREAM_COUNT_COL])
+            avg, _ = highest_class_average(classes, THROUGHPUT_COL)
+            y.append(avg)
+
         ax.plot(
             x,y,
             marker=approach_markers[approach],
             color=approach_colors[approach],
             markerfacecolor='none',
-            label=f"{approach}, (gd,bd,sc) = {best_line_class}")
+            label=f"{approach}", alpha=0.7)
     ax.set_xscale("log", basex=2)
     ax.set_xticks(unique_col_vals(data, GROUP_COUNT_COL))
     if log:

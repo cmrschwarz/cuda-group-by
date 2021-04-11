@@ -1,7 +1,7 @@
 #pragma once
 #include "group_by_hashtable.cuh"
 
-#define PER_THREAD_HT_MAX_BITS 8
+#define PER_THREAD_HT_MAX_BITS 7
 #define PER_THREAD_HT_EMPTY_GROUP_VAL ((uint64_t)0)
 #define PER_THREAD_HT_OVERSIZE_BITS 1
 

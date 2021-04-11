@@ -12,8 +12,8 @@
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
 #define ENABLE_APPROACH_WARP_CMP true
 #define ENABLE_APPROACH_BLOCK_CMP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
@@ -538,11 +538,11 @@ int main()
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
+    run_benchmarks_for_group_bit_count<6>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
 
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
-    run_benchmarks_for_group_bit_count<6>(&bench_data);
     run_benchmarks_for_group_bit_count<10>(&bench_data);
     run_benchmarks_for_group_bit_count<16>(&bench_data);
     run_benchmarks_for_group_bit_count<22>(&bench_data);
