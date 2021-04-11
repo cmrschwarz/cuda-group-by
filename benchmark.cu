@@ -429,12 +429,12 @@ void run_approaches(
             stream_count, iteration, "block_cmp_old");
 #endif
 #if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
-        group_by_block_cmp<GROUP_BIT_COUNT, true>(
+        group_by_block_cmp<GROUP_BIT_COUNT, true, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "block_cmp_naive_writeout");
+            stream_count, iteration, "block_cmp_old_naive_writeout");
 #endif
     }
 #endif

@@ -35,7 +35,7 @@ COLUMNS = list(range(0, COLUMN_COUNT))
 legacy_approach_remap = {
     "thread_per_group": "block_cmp",
     "thread_per_group_hashmap_writeout": "block_cmp",
-    "thread_per_group_naive_writeout": "block_cmp_naive_writeout",
+    "thread_per_group_naive_writeout": "block_cmp_old_naive_writeout",
     "threads_per_group": "warp_cmp",
 }
 approach_colors = {
@@ -45,7 +45,7 @@ approach_colors = {
     "warp_cmp": "gold",
     "block_cmp": "deepskyblue",
     "block_cmp_old": "darkgreen",
-    "block_cmp_naive_writeout": "darkred",
+    "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
     "throughput_test": "lightgray"
@@ -57,7 +57,7 @@ approach_markers = {
     "warp_cmp": "<",
     "block_cmp": "x",
     "block_cmp_old": "1",
-    "block_cmp_naive_writeout": "*",
+    "block_cmp_old_naive_writeout": "*",
     "shared_mem_hashtable": ">",
     "cub_radix_sort": "o",
     "throughput_test": "+"
