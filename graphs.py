@@ -37,14 +37,14 @@ legacy_approach_remap = {
     "thread_per_group_hashmap_writeout": "block_cmp",
     "thread_per_group_naive_writeout": "block_cmp_old_naive_writeout",
     "threads_per_group": "warp_cmp",
+    "hashtable_lazy_out_idx": "hashtable",
 }
 approach_colors = {
     "hashtable": "darkorange",
-    "hashtable_eager_out_idx": "darkorange",
-    "hashtable_lazy_out_idx": "green",
+    "hashtable_eager_out_idx": "green",
     "warp_cmp": "gold",
     "block_cmp": "deepskyblue",
-    "block_cmp_old": "darkgreen",
+    "block_cmp_old": "lightcoral",
     "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
@@ -598,10 +598,17 @@ def read_csv(path):
         if len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT:
             iters_fix = 0
         elif len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT - 1:
-            # legacy support for benchmarks without iterations 
+            # legacy support for old benchmarks without iterations 
             iters_fix = 1
+            # these old benchmarks only had the eager version and called
+            # it 'hashtable'
+            legacy_approach_remap["hashtable"] = "hashtable_eager_out_idx"
         else:
             raise ValueError("unexpected column count in " + path)
+
+        for ap in approach_colors:
+            if ap not in legacy_approach_remap:
+                legacy_approach_remap[ap] = ap
         
         for csv_row in reader:
             data_row = [None] * COLUMN_COUNT
@@ -645,9 +652,6 @@ def main():
     # initialization
     global process_start_time
     process_start_time = time.time_ns()
-    for ap in approach_colors:
-        if ap not in legacy_approach_remap:
-            legacy_approach_remap[ap] = ap
 
     #cli parsing
     args = sys.argv

@@ -14,6 +14,7 @@
 #define ENABLE_APPROACH_CUB_RADIX_SORT false
 #define ENABLE_APPROACH_THROUGHPUT_TEST false
 
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
 #define ENABLE_BLOCK_CMP_OLD true
 
@@ -59,16 +60,13 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 
 #if BIG_DATA
 // 2^27, 8 Byte per entry -> 1 GiB per stored column
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
-const size_t benchmark_row_count_variants[] = {128,
-                                               1024,
-                                               16384,
-                                               131072,
-                                               BENCHMARK_ROWS_MAX / 4,
-                                               BENCHMARK_ROWS_MAX / 2,
-                                               BENCHMARK_ROWS_MAX};
+#define BENCHMARK_ROWS_BITS_MAX 27
+#define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
+const size_t benchmark_row_count_variants[] = {
+    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 25)
+#define BENCHMARK_ROWS_BITS_MAX 25
+#define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
@@ -80,15 +78,16 @@ const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
 #endif
 
 #if BIG_DATA
-const int benchmark_gpu_grid_dim_variants[] = {0, 32, 64, 128, 256, 512};
+const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
+                                               512, 1024, 2048, 4096, 8192};
 #else
 const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
 
 #if BIG_DATA
-#define BENCHMARK_GROUP_BITS_MAX 20
+#define BENCHMARK_GROUP_BITS_MAX BENCHMARK_ROWS_BITS_MAX
 #else
-#define BENCHMARK_GROUP_BITS_MAX 12
+#define BENCHMARK_GROUP_BITS_MAX 16
 #endif
 
 #if BIG_DATA
@@ -383,18 +382,20 @@ void run_approaches(
 #if ENABLE_APPROACH_HASHTABLE
     if (approach_hashtable_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+#if ENABLE_HASHTABLE_EAGER_OUT_IDX
         group_by_hashtable<GROUP_BIT_COUNT, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "hashtable_eager_out_idx");
+#endif
         group_by_hashtable<GROUP_BIT_COUNT, false>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "hashtable_lazy_out_idx");
+            stream_count, iteration, "hashtable");
     }
 #endif
 
@@ -510,20 +511,22 @@ int main()
                              "count; run index; time in ms"
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
-    run_benchmarks_for_group_bit_count<5>(&bench_data);
+
     run_benchmarks_for_group_bit_count<1>(&bench_data);
+    run_benchmarks_for_group_bit_count<3>(&bench_data);
+    run_benchmarks_for_group_bit_count<5>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
+
+#if BIG_DATA
+    run_benchmarks_for_group_bit_count<2>(&bench_data);
+    run_benchmarks_for_group_bit_count<6>(&bench_data);
+    run_benchmarks_for_group_bit_count<10>(&bench_data);
+    run_benchmarks_for_group_bit_count<16>(&bench_data);
+    run_benchmarks_for_group_bit_count<22>(&bench_data);
+#endif
+
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
-    run_benchmarks_for_group_bit_count<7>(&bench_data);
-    run_benchmarks_for_group_bit_count<9>(&bench_data);
-    run_benchmarks_for_group_bit_count<10>(&bench_data);
-    run_benchmarks_for_group_bit_count<11>(&bench_data);
-    // run_benchmarks_for_group_bit_count<16>(&bench_data);
-    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX - 1>(
-        &bench_data);
-#if BIG_DATA
-#endif
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();
     free_bench_data(&bench_data);
