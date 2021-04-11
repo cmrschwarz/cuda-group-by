@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import csv
 import sys
+import multiprocessing
 import os
 import math
 import numpy as np
@@ -228,7 +229,7 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
     rowcount_vals = sorted(dict.fromkeys(col_vals(filtered, ROW_COUNT_COL)))
 
     y_axis_vals = sorted(dict.fromkeys(col_vals(filtered, y_axis_col)))
-
+    
     fig, axes = plt.subplots(
         nrows=len(rowcount_vals), ncols=len(y_axis_vals),
         dpi=200, 
@@ -609,6 +610,18 @@ def read_csv(path):
             data.append(data_row)
     return data
 
+def parallel(fns):
+    processes=[]
+    for fn in fns:
+        p = multiprocessing.Process(target=fn)
+        processes.append(p)
+        p.start()
+    for p in processes:
+        p.join()
+
+def sequential(fns):
+    for fn in fns:
+        fn()
 
 def main():
     #cli parsing
@@ -631,18 +644,23 @@ def main():
         [ITERATION_COL, THROUGHPUT_COL, TIME_MS_COL]
     )
 
-    #generate graphs
+    #change to output path dir so the images are generated in the right folder
     os.chdir(output_path)
-    throughput_over_group_count(data_avg)
-    throughput_over_stream_count(data_avg, 32)
-    col_stddev_over_row_count(data, 32, False, False, THROUGHPUT_COL, "throughput", "GiB/s, 16 B per row")
-    col_stddev_over_row_count(data, 32, True, False, THROUGHPUT_COL, "throughput")
-    col_stddev_over_row_count(data, 32, False, True, TIME_MS_COL, "runtime",  "time in ms")
-    col_stddev_over_row_count(data, 32, True, True, TIME_MS_COL, "runtime")
-    runtime_over_group_size_barring_approaches_stacking_row_count(data_avg)
-    throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True)
-    throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False)
-    grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0)
-    
+
+    #generate graphs (in parallel)
+    jobs = [
+        lambda: throughput_over_group_count(data_avg),
+        lambda: throughput_over_stream_count(data_avg, 32),
+        lambda: col_stddev_over_row_count(data, 32, False, False, THROUGHPUT_COL, "throughput", "GiB/s, 16 B per row"),
+        lambda: col_stddev_over_row_count(data, 32, True, False, THROUGHPUT_COL, "throughput"),
+        lambda: col_stddev_over_row_count(data, 32, False, True, TIME_MS_COL, "runtime",  "time in ms"),
+        lambda: col_stddev_over_row_count(data, 32, True, True, TIME_MS_COL, "runtime"),
+        lambda: runtime_over_group_size_barring_approaches_stacking_row_count(data_avg),
+        lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True),
+        lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
+        lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0),
+    ]
+    parallel(jobs)
+
 if __name__ == "__main__":
     main()
