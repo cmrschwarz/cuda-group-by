@@ -371,15 +371,21 @@ void record_time_and_validate(
     CUDA_TRY(cudaDeviceSynchronize());
     float time;
     CUDA_TRY(cudaEventElapsedTime(&time, bd->start_event, bd->end_event));
+    bool success = true;
     if (!no_validate) {
-        RELASE_ASSERT(validate(bd, row_count_variant));
+        success = validate(bd, row_count_variant);
     }
+
+#if (!BIG_DATA)
+    RELASE_ASSERT(success);
+#endif
     // the flush on std::endl is intentional to allow for tail -f style
     // status inspections
     bd->output_csv << approach_name << ";" << group_count << ";"
                    << benchmark_row_count_variants[row_count_variant] << ";"
                    << grid_dim << ";" << block_dim << ";" << stream_count << ";"
-                   << iteration << ";" << time << std::endl;
+                   << iteration << ";" << (success ? "PASS" : "FAIL") << ";"
+                   << time << std::endl;
 }
 
 template <int GROUP_BIT_COUNT>
@@ -538,7 +544,7 @@ int main()
     alloc_bench_data(&bench_data);
     new (&bench_data.output_csv) std::ofstream{"bench.csv"};
     bench_data.output_csv << "approach;groups;rows;grid dim;block dim;stream "
-                             "count; run index; time in ms"
+                             "count; run index; validation; time in ms"
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
 

@@ -23,9 +23,10 @@ GRID_DIM_COL = 3
 BLOCK_DIM_COL = 4
 STREAM_COUNT_COL = 5
 ITERATION_COL = 6
-TIME_MS_COL = 7
-THROUGHPUT_COL = 8
-COLUMN_COUNT = 9
+VALIDATION_COL = 7
+TIME_MS_COL = 8
+THROUGHPUT_COL = 9
+COLUMN_COUNT = 10
 #just throughput for now
 VIRTUAL_COLUMN_COUNT = 1
 
@@ -611,12 +612,15 @@ def read_csv(path):
         header = next(reader) # skip header
         if len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT:
             iters_fix = 0
-        elif len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT - 1:
+        elif len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT - 2:
             # legacy support for old benchmarks without iterations 
-            iters_fix = 1
+            iters_fix = 2
             # these old benchmarks only had the eager version and called
             # it 'hashtable'
             legacy_approach_remap["hashtable"] = "hashtable_eager_out_idx"
+        elif len(header) == COLUMN_COUNT - VIRTUAL_COLUMN_COUNT - 1:
+            # legacy support for old benchmarks without validation column 
+            iters_fix = 1
         else:
             raise ValueError("unexpected column count in " + path)
 
@@ -633,6 +637,7 @@ def read_csv(path):
             data_row[BLOCK_DIM_COL] = (int(csv_row[BLOCK_DIM_COL]))
             data_row[STREAM_COUNT_COL] = (int(csv_row[STREAM_COUNT_COL]))
             data_row[ITERATION_COL] = 0 if iters_fix != 0 else (int(csv_row[ITERATION_COL]))
+            data_row[VALIDATION_COL] = "PASS" if iters_fix != 0 else csv_row[VALIDATION_COL]
             data_row[TIME_MS_COL] = (float(csv_row[TIME_MS_COL - iters_fix]))
             data_row[THROUGHPUT_COL] = (1000. * DB_ROW_SIZE_BYTES * data_row[ROW_COUNT_COL]) / data_row[TIME_MS_COL] / 2**30
             data.append(data_row)
@@ -688,6 +693,9 @@ def main():
     
     #read in data
     data = read_csv(input_path)
+
+    # filter out failed runs
+    data = filter_col_val(data, VALIDATION_COL, "PASS")
 
     # average runs since we basically always need this
     data_avg = average_columns(
