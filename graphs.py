@@ -159,7 +159,7 @@ def filter_col_val(rows, col, val):
 
 # graph generators
 
-def throughput_over_group_count(data):
+def throughput_over_group_count(data, log=False):
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
@@ -185,10 +185,12 @@ def throughput_over_group_count(data):
             label=f"{approach}, (gd,bd,sc) = {best_line_class}")
     ax.set_xscale("log", basex=2)
     ax.set_xticks(unique_col_vals(data, GROUP_COUNT_COL))
-    #ax.set_yscale("log", basey=2)
-    ax.set_ylim(0)
+    if log:
+        ax.set_yscale("log", basey=2)
+    else:
+        ax.set_ylim(0)
     ax.legend()
-    fig.savefig("throughput_over_group_count.png")
+    fig.savefig("throughput_over_group_count" + ("_log" if log else "") +".png")
 
 def throughput_over_stream_count(data, group_count):
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
@@ -681,6 +683,7 @@ def main():
     #generate graphs (in parallel)
     jobs = [
         lambda: throughput_over_group_count(data_avg),
+        lambda: throughput_over_group_count(data_avg, True),
         lambda: throughput_over_stream_count(data_avg, 32),
         lambda: col_stddev_over_row_count(data, 32, False, False, THROUGHPUT_COL, "throughput", "GiB/s, 16 B per row"),
         lambda: col_stddev_over_row_count(data, 32, True, False, THROUGHPUT_COL, "throughput"),
