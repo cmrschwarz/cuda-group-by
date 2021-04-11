@@ -12,8 +12,12 @@ option(
     ON
 )
 
+# we use this for some ifdefs to make 
+# nvcc benchmark.cu work without any parameters
+target_compile_definitions(cuda-group-by PRIVATE CUDA_GROUP_BY_CMAKE_BUILD)
+
 if(${CUDA_GROUP_BY_USE_CUB_SUBMODULE})
-    include_directories(
+    target_include_directories(
         cuda-group-by 
         PRIVATE 
         "${CMAKE_CURRENT_SOURCE_DIR}/deps/cub"

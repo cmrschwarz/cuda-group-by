@@ -5,7 +5,14 @@
 // Disable the "dynamic initialization in unreachable code" warning message
 // thrown inside from inside cub
 #pragma diag_suppress initialization_not_reachable
+
+#ifdef CUDA_GROUP_BY_CMAKE_BUILD
 #include <cub/cub.cuh>
+#else
+// always use the submodule version when we are not building with cmake
+// and don't have a proper include path setup
+#include "./deps/cub/cub/cub.cuh"
+#endif
 
 static void* cub_radix_sort_temp_storage;
 static size_t cub_radix_sort_temp_storage_size;
