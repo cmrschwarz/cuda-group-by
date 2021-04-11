@@ -318,27 +318,32 @@ bool validate(bench_data* bd, int row_count_variant)
         auto expected = bd->expected_output[row_count_variant].find(group);
         uint64_t got = bd->output_cpu.aggregate_col[i];
         if (expected == bd->expected_output[row_count_variant].end()) {
+#if (!BIG_DATA)
             fprintf(
                 stderr,
                 "validation failiure: found unexpected group %llu in output "
                 "index %llu\n",
                 group, i);
             __builtin_trap();
+#endif
             return false;
         }
         else if (expected->second != got) {
+#if (!BIG_DATA)
             fprintf(
                 stderr,
                 "validation failiure for group %llu: expected %llu, got "
                 "%llu\n",
                 group, expected->second, got);
             __builtin_trap();
+#endif
             return false;
         }
     }
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
     if (bd->output_cpu.row_count != expected_output_row_count) {
+#if (!BIG_DATA)
         fprintf(
             stderr,
             "validation failiure: expected %llu different groups, got "
@@ -357,6 +362,7 @@ bool validate(bench_data* bd, int row_count_variant)
             }
         }
         __builtin_trap();
+#endif
         return false;
     }
     return true;
