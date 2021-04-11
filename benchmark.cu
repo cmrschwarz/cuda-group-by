@@ -163,7 +163,7 @@ void alloc_bench_data(bench_data* bd)
 {
     int dc;
     cudaGetDeviceCount(&dc);
-    RELASE_ASSERT(dc == 1);
+    // RELASE_ASSERT(dc == 1);
     cudaGetDeviceProperties(&bd->device_properties, 0);
 
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
