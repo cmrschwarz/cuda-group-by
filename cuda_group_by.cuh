@@ -9,6 +9,9 @@
 // this causes e.g. atomicAdd to complain about parameter types
 typedef unsigned long long int cudaUInt64_t;
 
+#define CUDA_WARP_SIZE 32
+#define CUDA_MAX_BLOCK_SIZE 1024
+
 struct db_table {
     uint64_t* group_col;
     uint64_t* aggregate_col;

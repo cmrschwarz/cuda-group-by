@@ -1,7 +1,7 @@
 #pragma once
 #include "group_by_hashtable.cuh"
 
-#define SHARED_MEM_HT_MAX_BITS 12
+#define SHARED_MEM_HT_MAX_BITS 11
 #define SHARED_MEM_HT_EMPTY_GROUP_VAL ((uint64_t)0)
 #define SHARED_MEM_HT_OVERSIZE_BITS 1
 

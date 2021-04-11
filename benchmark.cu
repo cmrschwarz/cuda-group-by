@@ -7,20 +7,26 @@
 #include <fstream>
 #include <iomanip>
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
-#define ENABLE_APPROACH_THREAD_PER_GROUP true
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
+#define ENABLE_APPROACH_BLOCK_CMP true
 #define ENABLE_APPROACH_CUB_RADIX_SORT false
 #define ENABLE_APPROACH_THROUGHPUT_TEST false
 
-#define ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
+#define ENABLE_BLOCK_CMP_OLD true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
 #endif
 
-#if ENABLE_APPROACH_THREAD_PER_GROUP
-#include "group_by_thread_per_group.cuh"
+#if ENABLE_APPROACH_WARP_CMP
+#include "group_by_warp_cmp.cuh"
+#endif
+
+#if ENABLE_APPROACH_BLOCK_CMP
+#include "group_by_block_cmp.cuh"
 #endif
 
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
@@ -55,15 +61,16 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 // 2^27, 8 Byte per entry -> 1 GiB per stored column
 #define BENCHMARK_ROWS_MAX ((size_t)1 << 27)
 const size_t benchmark_row_count_variants[] = {128,
+                                               1024,
                                                16384,
                                                131072,
                                                BENCHMARK_ROWS_MAX / 4,
                                                BENCHMARK_ROWS_MAX / 2,
                                                BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_MAX ((size_t)1 << 22)
+#define BENCHMARK_ROWS_MAX ((size_t)1 << 25)
 const size_t benchmark_row_count_variants[] = {
-    2, 512, 8192, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
@@ -176,8 +183,11 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_HASHTABLE
     group_by_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
-#if ENABLE_APPROACH_THREAD_PER_GROUP
-    group_by_thread_per_group_init(BENCHMARK_GROUPS_MAX);
+#if ENABLE_APPROACH_WARP_CMP
+    group_by_warp_cmp_init(BENCHMARK_GROUPS_MAX);
+#endif
+#if ENABLE_APPROACH_BLOCK_CMP
+    group_by_block_cmp_init(BENCHMARK_GROUPS_MAX);
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
@@ -201,8 +211,11 @@ void free_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_fin();
 #endif
-#if ENABLE_APPROACH_THREAD_PER_GROUP
-    group_by_thread_per_group_fin();
+#if ENABLE_APPROACH_BLOCK_CMP
+    group_by_block_cmp_fin();
+#endif
+#if ENABLE_APPROACH_WARP_CMP
+    group_by_warp_cmp_fin();
 #endif
 #if ENABLE_APPROACH_HASHTABLE
     group_by_hashtable_fin();
@@ -385,28 +398,43 @@ void run_approaches(
     }
 #endif
 
-#if ENABLE_APPROACH_THREAD_PER_GROUP
-    if (approach_thread_per_group_available(
+#if ENABLE_APPROACH_WARP_CMP
+    if (approach_warp_cmp_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        group_by_thread_per_group<GROUP_BIT_COUNT, false>(
+        group_by_warp_cmp<GROUP_BIT_COUNT>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration,
-#if ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT
-            "thread_per_group_hashmap_writeout"
-#else
-            "thread_per_group"
+            stream_count, iteration, "warp_cmp");
+    }
 #endif
-        );
-#if ENABLE_THREAD_PER_GROUP_NAIVE_WRITEOUT
-        group_by_thread_per_group<GROUP_BIT_COUNT, true>(
+
+#if ENABLE_APPROACH_BLOCK_CMP
+    if (approach_block_cmp_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        group_by_block_cmp<GROUP_BIT_COUNT, false>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
             bd->events, bd->start_event, bd->end_event);
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "thread_per_group_naive_writeout");
+            stream_count, iteration, "block_cmp");
+
+#if ENABLE_BLOCK_CMP_OLD
+        group_by_block_cmp<GROUP_BIT_COUNT, false, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "block_cmp_old");
+#endif
+#if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
+        group_by_block_cmp<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "block_cmp_naive_writeout");
 #endif
     }
 #endif
@@ -486,13 +514,15 @@ int main()
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<8>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
-#if BIG_DATA
-    run_benchmarks_for_group_bit_count<2>(&bench_data);
-    run_benchmarks_for_group_bit_count<3>(&bench_data);
-    run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<16>(&bench_data);
+
+    run_benchmarks_for_group_bit_count<7>(&bench_data);
+    run_benchmarks_for_group_bit_count<9>(&bench_data);
+    run_benchmarks_for_group_bit_count<10>(&bench_data);
+    run_benchmarks_for_group_bit_count<11>(&bench_data);
+    // run_benchmarks_for_group_bit_count<16>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX - 1>(
         &bench_data);
+#if BIG_DATA
 #endif
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();

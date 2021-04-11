@@ -32,14 +32,20 @@ VIRTUAL_COLUMN_COUNT = 1
 COLUMNS = list(range(0, COLUMN_COUNT))
 
 #coloring options
+legacy_approach_remap = {
+    "thread_per_group": "block_cmp",
+    "thread_per_group_hashmap_writeout": "block_cmp",
+    "thread_per_group_naive_writeout": "block_cmp_naive_writeout",
+    "threads_per_group": "warp_cmp",
+}
 approach_colors = {
     "hashtable": "darkorange",
     "hashtable_eager_out_idx": "darkorange",
     "hashtable_lazy_out_idx": "green",
-    "threads_per_group": "gold",
-    "thread_per_group": "deepskyblue",
-    "thread_per_group_naive_writeout": "deepskyblue",
-    "thread_per_group_hashmap_writeout": "darkgreen",
+    "warp_cmp": "gold",
+    "block_cmp": "deepskyblue",
+    "block_cmp_old": "darkgreen",
+    "block_cmp_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
     "throughput_test": "lightgray"
@@ -48,10 +54,10 @@ approach_markers = {
     "hashtable": "^",
     "hashtable_eager_out_idx": "^",
     "hashtable_lazy_out_idx": "+",
-    "threads_per_group": "<",
-    "thread_per_group": "x",
-    "thread_per_group_naive_writeout": "+",
-    "thread_per_group_hashmap_writeout": "*",
+    "warp_cmp": "<",
+    "block_cmp": "x",
+    "block_cmp_old": "1",
+    "block_cmp_naive_writeout": "*",
     "shared_mem_hashtable": ">",
     "cub_radix_sort": "o",
     "throughput_test": "+"
@@ -597,7 +603,7 @@ def read_csv(path):
         
         for csv_row in reader:
             data_row = [None] * COLUMN_COUNT
-            data_row[APPROACH_COL] = (csv_row[APPROACH_COL])
+            data_row[APPROACH_COL] = legacy_approach_remap[csv_row[APPROACH_COL]]
             data_row[GROUP_COUNT_COL] = (int(csv_row[GROUP_COUNT_COL]))
             data_row[ROW_COUNT_COL] = (int(csv_row[ROW_COUNT_COL]))
             data_row[GRID_DIM_COL] = (int(csv_row[GRID_DIM_COL]))
@@ -622,7 +628,7 @@ def sequential(fns):
     for fn in fns:
         fn()
 
-process_start_time = time.time_ns()
+
 def timestamp(msg):
     global process_start_time
     print(
@@ -634,6 +640,13 @@ def timestamp(msg):
 
 
 def main():
+    # initialization
+    global process_start_time
+    process_start_time = time.time_ns()
+    for ap in approach_colors:
+        if ap not in legacy_approach_remap:
+            legacy_approach_remap[ap] = ap
+
     #cli parsing
     args = sys.argv
 
