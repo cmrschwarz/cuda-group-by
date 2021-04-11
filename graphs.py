@@ -8,6 +8,7 @@ import csv
 import sys
 import multiprocessing
 import os
+import time
 import math
 import numpy as np
 
@@ -216,6 +217,7 @@ def throughput_over_stream_count(data, group_count):
 
 
 def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=None):
+    timestamp("heatmap start")
     assert((group_count is None) != (stream_count is None)) 
     filtered = filter_col_val(data, APPROACH_COL, approach)
 
@@ -288,11 +290,8 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
             ax.set_xticklabels(gd_vals)
             ax.set_yticklabels(bd_vals)
             if col_id + 1 == len(y_axis_vals):
-                #ax.figure.colorbar(im, ax=ax)
                 cax = make_axes_locatable(ax).append_axes("right", size="10%", pad=0.5)
                 fig.colorbar(im, cax=cax)
-    #plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
-
     fig.tight_layout(h_pad=2)
     fig.savefig(
         f"{approach}_grid_block_heatmap_over_rowcount_and_" 
@@ -623,14 +622,33 @@ def sequential(fns):
     for fn in fns:
         fn()
 
+process_start_time = time.time_ns()
+def timestamp(msg):
+    global process_start_time
+    print(
+        "[" 
+        + str(round(10**-6 * (time.time_ns() - process_start_time), 3)) 
+        + " ms]: " 
+        + msg
+    ) 
+
+
 def main():
     #cli parsing
-    if len(sys.argv) > 1:
-        input_path = sys.argv[1]
+    args = sys.argv
+
+    gen_all = False  
+    if len(args) > 1 and args[1] == "-a":
+        gen_all = True
+        del args[1]
+
+    if len(args) > 1:
+        input_path = args[1]
     else:
         input_path="bench.csv"
-    if len(sys.argv) > 2:
-        output_path = sys.argv[2]
+
+    if len(args) > 2:
+        output_path = args[2]
     else:
         output_path="./graphs"
         os.makedirs(output_path, exist_ok=True)
@@ -658,8 +676,13 @@ def main():
         lambda: runtime_over_group_size_barring_approaches_stacking_row_count(data_avg),
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True),
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
+    ]
+    slow_jobs = [
         lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0),
     ]
+    if(gen_all):
+        jobs = jobs + slow_jobs
+    
     parallel(jobs)
 
 if __name__ == "__main__":
