@@ -48,10 +48,10 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 
 #if BIG_DATA
-#define ITERATION_COUNT 4
+#define ITERATION_COUNT 5
 #else
 #define ITERATION_COUNT 3
 #endif
@@ -64,11 +64,11 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 #endif
 
 #if BIG_DATA
-// 2^27, 8 Byte per entry -> 1 GiB per stored column
-#define BENCHMARK_ROWS_BITS_MAX 27
+// 2^26, 16 Byte per entry -> 1 GiB data
+#define BENCHMARK_ROWS_BITS_MAX 26
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
-    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+    1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
 #define BENCHMARK_ROWS_BITS_MAX 25
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
@@ -550,6 +550,7 @@ int main()
 
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
+    run_benchmarks_for_group_bit_count<4>(&bench_data);
     run_benchmarks_for_group_bit_count<12>(&bench_data);
     run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
