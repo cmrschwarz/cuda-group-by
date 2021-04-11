@@ -48,7 +48,8 @@ approach_colors = {
     "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "cub_radix_sort": "turquoise",
-    "throughput_test": "lightgray"
+    "throughput_test": "lightgray",
+    "per_thread_hashtable": "teal",
 }
 approach_markers = {
     "hashtable": "^",
@@ -60,7 +61,8 @@ approach_markers = {
     "block_cmp_old_naive_writeout": "*",
     "shared_mem_hashtable": ">",
     "cub_radix_sort": "o",
-    "throughput_test": "+"
+    "throughput_test": "+",
+    "per_thread_hashtable": "2",
 }
 
 
