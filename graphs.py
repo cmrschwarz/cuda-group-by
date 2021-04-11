@@ -50,6 +50,7 @@ approach_colors = {
     "cub_radix_sort": "turquoise",
     "throughput_test": "lightgray",
     "per_thread_hashtable": "teal",
+    "per_thread_hashtable_bank_optimized": "lime",
 }
 approach_markers = {
     "hashtable": "^",
@@ -63,6 +64,7 @@ approach_markers = {
     "cub_radix_sort": "o",
     "throughput_test": "+",
     "per_thread_hashtable": "2",
+    "per_thread_hashtable_bank_optimized": "3",
 }
 
 

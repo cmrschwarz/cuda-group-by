@@ -463,7 +463,7 @@ void run_approaches(
     }
 #endif
 
-#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+#if ENABLE_APPROACH_PER_THREAD_HASHTABLE
     if (approach_per_thread_hashtable_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
         group_by_per_thread_hashtable<GROUP_BIT_COUNT>(
@@ -472,6 +472,13 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "per_thread_hashtable");
+
+        group_by_per_thread_hashtable<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "per_thread_hashtable_bank_optimized");
     }
 #endif
 
@@ -538,14 +545,14 @@ int main()
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
-    run_benchmarks_for_group_bit_count<6>(&bench_data);
-    run_benchmarks_for_group_bit_count<8>(&bench_data);
+    run_benchmarks_for_group_bit_count<7>(&bench_data);
+    run_benchmarks_for_group_bit_count<9>(&bench_data);
 
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
-    run_benchmarks_for_group_bit_count<10>(&bench_data);
-    run_benchmarks_for_group_bit_count<16>(&bench_data);
-    run_benchmarks_for_group_bit_count<22>(&bench_data);
+    run_benchmarks_for_group_bit_count<12>(&bench_data);
+    run_benchmarks_for_group_bit_count<15>(&bench_data);
+    run_benchmarks_for_group_bit_count<20>(&bench_data);
 #endif
 
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);

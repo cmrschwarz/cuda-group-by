@@ -10,7 +10,15 @@
 typedef unsigned long long int cudaUInt64_t;
 
 #define CUDA_WARP_SIZE 32
+#define CUDA_WARP_SIZE_BITS 5
 #define CUDA_MAX_BLOCK_SIZE 1024
+#define CUDA_MAX_BLOCK_SIZE_BITS 10
+
+// 48 Kilobytes of shared memory per block
+#define CUDA_SHARED_MEM_PER_BLOCK 0xC000
+
+// -> (rounded down) 15 bits of shared memory
+#define CUDA_SHARED_MEM_BITS_PER_BLOCK 15
 
 struct db_table {
     uint64_t* group_col;
