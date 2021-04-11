@@ -3,6 +3,7 @@
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 from matplotlib.axes import Axes
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import csv
 import sys
 import os
@@ -143,6 +144,7 @@ def max_col_val(rows, col):
 def min_col_val(rows, col):
     return min(rows, key=lambda r: r[col])[col]
 
+
 def filter_col_val(rows, col, val):
     return list(filter(lambda r: r[col] == val, rows))
 
@@ -212,59 +214,90 @@ def throughput_over_stream_count(data, group_count):
     fig.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
 
-def grid_dim_block_dim_heatmap(data, group_count, row_count, stream_count, approach):
-    filtered = filter_col_val(data, ROW_COUNT_COL, row_count)
-    filtered = filter_col_val(filtered, GROUP_COUNT_COL, group_count)
+def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=None):
+    assert((group_count is None) != (stream_count is None)) 
+    filtered = filter_col_val(data, APPROACH_COL, approach)
 
-    filtered = filter_col_val(filtered, STREAM_COUNT_COL, stream_count)
-    filtered = filter_col_val(filtered, APPROACH_COL, approach)
+    if stream_count is not None:
+        y_axis_col = GROUP_COUNT_COL
+        filtered = filter_col_val(filtered, STREAM_COUNT_COL, stream_count)
+    else:
+        y_axis_col = STREAM_COUNT_COL
+        filtered = filter_col_val(filtered, GROUP_COUNT_COL, group_count)
 
-    classified = classify_mult(filtered, [GRID_DIM_COL, BLOCK_DIM_COL])
+    rowcount_vals = sorted(dict.fromkeys(col_vals(filtered, ROW_COUNT_COL)))
 
-    gd_vals, bd_vals = zip(*classified.keys())
-    gd_vals = sorted(dict.fromkeys(gd_vals).keys())
-    # reverse the y axis so the small values are at the bottom
-    bd_vals = sorted(dict.fromkeys(bd_vals).keys(), reverse=True)
-    gd_indices = {v:k for (k,v) in enumerate(gd_vals)}
-    bd_indices = {v:k for (k,v) in enumerate(bd_vals)}
+    y_axis_vals = sorted(dict.fromkeys(col_vals(filtered, y_axis_col)))
 
-    fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
-    ax.set_xlabel("grid dim")
-    ax.set_ylabel("block dim")
-    ax.set_title(
-        f"{approach}: throuphput per grid and block dim \n"
-        + f"(group_count = {group_count}, row_count = {row_count}, " 
-        + f"stream_count = {stream_count})\n"
+    fig, axes = plt.subplots(
+        nrows=len(rowcount_vals), ncols=len(y_axis_vals),
+        dpi=200, 
+        figsize=(
+            (len(y_axis_vals) + 1) * len(dict.fromkeys(col_vals(filtered, GRID_DIM_COL))),
+            len(rowcount_vals) * len(dict.fromkeys(col_vals(filtered, BLOCK_DIM_COL)))
+        ),
     )
- 
+    for (row_id, rc) in enumerate(rowcount_vals):
+        by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
+        rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
+        rc_max_val = max_col_val(by_row_count, THROUGHPUT_COL)
+        rc_val_range = rc_max_val - rc_min_val
+        for (col_id, yv) in enumerate(y_axis_vals):
+            ax = axes[row_id][col_id]
+            by_y_val = filter_col_val(by_row_count, y_axis_col, yv)
+            classified = classify_mult(by_y_val, [GRID_DIM_COL, BLOCK_DIM_COL])
+            if len(classified) == 0: continue
+            gd_vals, bd_vals = zip(*classified.keys())
+            gd_vals = sorted(dict.fromkeys(gd_vals).keys())
+            # reverse the y axis so the small values are at the bottom
+            bd_vals = sorted(dict.fromkeys(bd_vals).keys(), reverse=True)
+            gd_indices = {v:k for (k,v) in enumerate(gd_vals)}
+            bd_indices = {v:k for (k,v) in enumerate(bd_vals)}
 
-    grid = [[0] * len(bd_vals) for i in range(len(gd_vals))]
-    vals = []
-    for (gd, bd), rows in classified.items():
-        tp = col_average(rows, THROUGHPUT_COL)
-        grid[bd_indices[bd]][gd_indices[gd]] = tp
-        vals.append(tp)
-    val_min = min(vals)
-    val_range = max(vals) - val_min
-    for x in range(len(gd_vals)):
-      for y in range(len(bd_vals)):
-          ax.text(
-              x, y, grid[y][x], ha="center", va="center", 
-              color="black" if grid[y][x] < val_min + 0.8 * val_range else "white" 
-          )
+        
+            ax.set_xlabel("grid dim")
+            ax.set_ylabel("block dim")
+            ax.set_title(
+                f"rc = {rc}, " 
+                + (f"sc = {yv}" if stream_count is None else f"gc = {yv}")
+            )
+        
+            grid = [[0] * len(gd_vals) for i in range(len(bd_vals))]
+            vals = []
+            for (gd, bd), rows in classified.items():
+                tp = col_average(rows, THROUGHPUT_COL)
+                grid[bd_indices[bd]][gd_indices[gd]] = tp
+                vals.append(tp)
+            for x in range(len(gd_vals)):
+                for y in range(len(bd_vals)):
+                    val = grid[y][x]
+                    if val < 1000: 
+                        val_str = str(round(val, int(3-max(math.log10(val), 0))))
+                    else:
+                        val_str = str(round(val))
 
+                    ax.text(
+                        x, y, val_str, ha="center", va="center", 
+                        color="black" if (val - rc_min_val) / rc_val_range < 0.8 else "white" 
+                    )
+            im = ax.imshow(np.array(grid), cmap='Reds', vmin=rc_min_val, vmax=rc_max_val)
+            ax.set_xticks(range(len(gd_vals)))
+            ax.set_yticks(range(len(bd_vals)))
 
-    im = ax.imshow(np.array(grid), cmap='Reds')
-    ax.set_xticks(range(len(gd_vals)))
-    ax.set_yticks(range(len(bd_vals)))
-
-    ax.set_xticklabels(gd_vals)
-    ax.set_yticklabels(bd_vals)
-    ax.figure.colorbar(im, ax=ax)
+            ax.set_xticklabels(gd_vals)
+            ax.set_yticklabels(bd_vals)
+            if col_id + 1 == len(y_axis_vals):
+                #ax.figure.colorbar(im, ax=ax)
+                cax = make_axes_locatable(ax).append_axes("right", size="10%", pad=0.5)
+                fig.colorbar(im, cax=cax)
     #plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
-    #fig.tight_layout()
-    fig.savefig(f"heatmap_{approach}_grid_over_block_dim_gc{group_count}_rc{row_count}_sc{stream_count}.png", bbox_inches="tight")
+    fig.tight_layout(h_pad=2)
+    fig.savefig(
+        f"{approach}_grid_block_heatmap_over_rowcount_and_" 
+        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
+        + ".png",
+        bbox_inches="tight")
 
 def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
@@ -609,13 +642,7 @@ def main():
     runtime_over_group_size_barring_approaches_stacking_row_count(data_avg)
     throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, True)
     throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False)
-    grid_dim_block_dim_heatmap(
-        data_avg,
-        32,
-        512,
-        min(col_vals(data_avg, STREAM_COUNT_COL)),
-        "shared_mem_hashtable"
-    )
+    grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0)
     
 if __name__ == "__main__":
     main()
