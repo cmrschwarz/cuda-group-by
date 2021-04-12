@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 from matplotlib.axes import Axes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.colors import LinearSegmentedColormap
 import csv
 import sys
 import multiprocessing
@@ -167,6 +168,17 @@ def min_col_val(rows, col):
 def filter_col_val(rows, col, val):
     return list(filter(lambda r: r[col] == val, rows))
 
+def contains_col_val_mult(rows, coldict):
+    for r in rows:
+        match = True
+        for (col_id, col_value) in coldict.items():
+            if r[col_id] != col_value:
+                match = False
+                break
+        if match: return True
+
+    return False
+
 
 # graph generators
 
@@ -238,6 +250,85 @@ def throughput_over_stream_count(data, group_count):
     ax.legend()
     fig.savefig(f"throughput_over_stream_count_gc{group_count}.png")
 
+def grid_dim_block_dim_failiure_heatmap(data, approach, group_count=None, stream_count=None):
+    assert((group_count is None) != (stream_count is None)) 
+    filtered = filter_col_val(data, APPROACH_COL, approach)
+    colormap = LinearSegmentedColormap.from_list(
+        "failiure", ["lawngreen", "gold", "orange", "r"]
+    )
+    if stream_count is not None:
+        x_axis_col = GROUP_COUNT_COL
+    else:
+        x_axis_col = STREAM_COUNT_COL
+
+    # reversed so the highest value is at the top, not the bottom
+    rowcount_vals = sorted(unique_col_vals(filtered, ROW_COUNT_COL), reverse=True)
+
+    x_axis_vals = sorted(unique_col_vals(filtered, x_axis_col))
+    
+    grid_dim_vals = sorted(unique_col_vals(filtered, GRID_DIM_COL))
+     # reverse the y axis so the small values are at the bottom
+    block_dim_vals = sorted(unique_col_vals(filtered, BLOCK_DIM_COL), reverse=True)
+
+
+    grid_dim_indices = {v:k for (k,v) in enumerate(grid_dim_vals)}
+    block_dim_indices = {v:k for (k,v) in enumerate(block_dim_vals)}
+    fig, axes = plt.subplots(
+        nrows=len(rowcount_vals), ncols=len(x_axis_vals),
+        dpi=200, 
+        figsize=(
+            (len(x_axis_vals) + 1) * len(unique_col_vals(filtered, GRID_DIM_COL)),
+            len(rowcount_vals) * len(unique_col_vals(filtered, BLOCK_DIM_COL))
+        ),
+    )
+    for (row_id, rc) in enumerate(rowcount_vals):
+        by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
+        for (col_id, xv) in enumerate(x_axis_vals):
+            ax = axes[row_id][col_id]
+            by_x_val = filter_col_val(by_row_count, x_axis_col, xv)
+            classified = classify_mult(by_x_val, [GRID_DIM_COL, BLOCK_DIM_COL])
+
+            ax.set_xlabel("grid dim")
+            ax.set_ylabel("block dim")
+            ax.set_title(
+                f"rc = {rc}, " 
+                + (f"sc = {xv}" if stream_count is None else f"gc = {xv}")
+            )
+        
+            grid = [[0] * len(grid_dim_vals) for i in range(len(block_dim_vals))]
+            grid_abs = [[0] * len(grid_dim_vals) for i in range(len(block_dim_vals))]
+            for (gd, bd), rows in classified.items():
+                fail_count = len(filter_col_val(rows, VALIDATION_COL, "FAIL")) 
+                grid[block_dim_indices[bd]][grid_dim_indices[gd]] = fail_count / len(rows)
+                grid_abs[block_dim_indices[bd]][grid_dim_indices[gd]] = fail_count
+            for x in range(len(grid_dim_vals)):
+                for y in range(len(block_dim_vals)):
+                    val = grid[y][x] * 100
+                    if val == 0:
+                        val_str = "0"
+                    else:
+                        val_str = str(round(val, int(3-max(math.log10(val), 0))))
+                        if "." in val_str:
+                            val_str = (val_str + "0" * 5)[0:5]
+                        else:
+                            val_str = (val_str + "." + "0" * 4)[0:5]
+                    ax.text(
+                        x, y, 
+                        val_str + f" %\n[{grid_abs[y][x]}]",
+                        ha="center", va="center", color="black" 
+                    )
+            ax.imshow(np.array(grid), cmap=colormap, vmin=0, vmax=1)
+            ax.set_xticks(range(len(grid_dim_vals)))
+            ax.set_yticks(range(len(block_dim_vals)))
+
+            ax.set_xticklabels(grid_dim_vals)
+            ax.set_yticklabels(block_dim_vals)
+    fig.tight_layout(h_pad=2)
+    fig.savefig(
+        f"{approach}_grid_block_failiure_heatmap_over_rowcount_and_" 
+        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
+        + ".png",
+        bbox_inches="tight")
 
 def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=None):
     assert((group_count is None) != (stream_count is None)) 
@@ -297,11 +388,14 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
             for x in range(len(gd_vals)):
                 for y in range(len(bd_vals)):
                     val = grid[y][x]
-                    if val < 1000: 
+                    if val < 1000 and val != 0: 
                         val_str = str(round(val, int(3-max(math.log10(val), 0))))
                     else:
                         val_str = str(round(val))
-
+                    if "." in val_str:
+                        val_str = (val_str + "0" * 5)[0:5]
+                    else:
+                        val_str = (val_str + "." + "0" * 4)[0:5]
                     ax.text(
                         x, y, val_str, ha="center", va="center", 
                         color="black" if (val - rc_min_val) / rc_val_range < 0.8 else "white" 
@@ -693,10 +787,10 @@ def main():
     os.makedirs(output_path, exist_ok=True)
     
     #read in data
-    data = read_csv(input_path)
+    data_raw = read_csv(input_path)
 
     # filter out failed runs
-    data = filter_col_val(data, VALIDATION_COL, "PASS")
+    data = filter_col_val(data_raw, VALIDATION_COL, "PASS")
 
     # average runs since we basically always need this
     data_avg = average_columns(
@@ -724,6 +818,12 @@ def main():
         lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0),
     ]
     if(gen_all):
+        #generate a failiure heatmap for all approaches containing failiures
+        for ap in unique_col_vals(data_raw, APPROACH_COL):
+            if contains_col_val_mult(data_raw, {APPROACH_COL: ap, VALIDATION_COL: "FAIL"}):
+                slow_jobs.append(
+                    lambda ap=ap: grid_dim_block_dim_failiure_heatmap(data_raw, ap, stream_count=0)
+                )
         jobs = jobs + slow_jobs
     
     parallel(jobs)
