@@ -34,7 +34,7 @@ COLUMNS = list(range(0, COLUMN_COUNT))
 
 #coloring options
 legacy_approach_remap = {
-    "thread_per_group": "block_cmp",
+    "thread_per_group": "block_cmp_old",
     "thread_per_group_hashmap_writeout": "block_cmp",
     "thread_per_group_naive_writeout": "block_cmp_old_naive_writeout",
     "threads_per_group": "warp_cmp",
@@ -240,26 +240,26 @@ def throughput_over_stream_count(data, group_count):
 
 
 def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=None):
-    timestamp("heatmap start")
     assert((group_count is None) != (stream_count is None)) 
     filtered = filter_col_val(data, APPROACH_COL, approach)
 
     if stream_count is not None:
-        y_axis_col = GROUP_COUNT_COL
+        x_axis_col = GROUP_COUNT_COL
         filtered = filter_col_val(filtered, STREAM_COUNT_COL, stream_count)
     else:
-        y_axis_col = STREAM_COUNT_COL
+        x_axis_col = STREAM_COUNT_COL
         filtered = filter_col_val(filtered, GROUP_COUNT_COL, group_count)
 
-    rowcount_vals = sorted(dict.fromkeys(col_vals(filtered, ROW_COUNT_COL)))
+    # reversed so the highest value is at the top, not the bottom
+    rowcount_vals = sorted(unique_col_vals(filtered, ROW_COUNT_COL), reverse=True)
 
-    y_axis_vals = sorted(dict.fromkeys(col_vals(filtered, y_axis_col)))
+    x_axis_vals = sorted(unique_col_vals(filtered, x_axis_col))
     
     fig, axes = plt.subplots(
-        nrows=len(rowcount_vals), ncols=len(y_axis_vals),
+        nrows=len(rowcount_vals), ncols=len(x_axis_vals),
         dpi=200, 
         figsize=(
-            (len(y_axis_vals) + 1) * len(dict.fromkeys(col_vals(filtered, GRID_DIM_COL))),
+            (len(x_axis_vals) + 1) * len(dict.fromkeys(col_vals(filtered, GRID_DIM_COL))),
             len(rowcount_vals) * len(dict.fromkeys(col_vals(filtered, BLOCK_DIM_COL)))
         ),
     )
@@ -268,10 +268,10 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
         rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
         rc_max_val = max_col_val(by_row_count, THROUGHPUT_COL)
         rc_val_range = rc_max_val - rc_min_val
-        for (col_id, yv) in enumerate(y_axis_vals):
+        for (col_id, xv) in enumerate(x_axis_vals):
             ax = axes[row_id][col_id]
-            by_y_val = filter_col_val(by_row_count, y_axis_col, yv)
-            classified = classify_mult(by_y_val, [GRID_DIM_COL, BLOCK_DIM_COL])
+            by_x_val = filter_col_val(by_row_count, x_axis_col, xv)
+            classified = classify_mult(by_x_val, [GRID_DIM_COL, BLOCK_DIM_COL])
             if len(classified) == 0: continue
             gd_vals, bd_vals = zip(*classified.keys())
             gd_vals = sorted(dict.fromkeys(gd_vals).keys())
@@ -285,7 +285,7 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
             ax.set_ylabel("block dim")
             ax.set_title(
                 f"rc = {rc}, " 
-                + (f"sc = {yv}" if stream_count is None else f"gc = {yv}")
+                + (f"sc = {xv}" if stream_count is None else f"gc = {xv}")
             )
         
             grid = [[0] * len(gd_vals) for i in range(len(bd_vals))]
@@ -312,7 +312,7 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
 
             ax.set_xticklabels(gd_vals)
             ax.set_yticklabels(bd_vals)
-            if col_id + 1 == len(y_axis_vals):
+            if col_id + 1 == len(x_axis_vals):
                 cax = make_axes_locatable(ax).append_axes("right", size="10%", pad=0.5)
                 fig.colorbar(im, cax=cax)
     fig.tight_layout(h_pad=2)
@@ -689,7 +689,8 @@ def main():
         output_path = args[2]
     else:
         output_path="./graphs"
-        os.makedirs(output_path, exist_ok=True)
+
+    os.makedirs(output_path, exist_ok=True)
     
     #read in data
     data = read_csv(input_path)
