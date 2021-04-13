@@ -7,8 +7,12 @@
 #include <fstream>
 #include <iomanip>
 
-// to disable openmp even if available add && false
-#ifdef _OPENMP
+// to disable openmp even if available
+#define DONT_WANT_OPENMP false
+// to disable pinning of the output buffer
+#define DONT_WANT_PINNED_MEM false
+
+#if defined(_OPENMP) && !(DONT_WANT_OPENMP)
 #include <omp.h>
 #define USE_OPENMP true
 #else
@@ -17,17 +21,17 @@
 
 int OMP_THREAD_COUNT = 0;
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
-#define ENABLE_APPROACH_WARP_CMP false
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
 #define ENABLE_APPROACH_BLOCK_CMP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
-#define ENABLE_BLOCK_CMP_OLD false
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
+#define ENABLE_BLOCK_CMP_OLD true
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -85,26 +89,26 @@ const size_t benchmark_row_count_variants[] = {
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
-
+// const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128};
+const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
                                                512, 1024, 2048, 4096, 8192};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {0, 64, 128, 512};
+const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
 
 #if BIG_DATA
 #define BENCHMARK_GROUP_BITS_MAX BENCHMARK_ROWS_BITS_MAX
 #else
-#define BENCHMARK_GROUP_BITS_MAX 16
+#define BENCHMARK_GROUP_BITS_MAX 20
 #endif
 
 #if BIG_DATA
@@ -157,6 +161,18 @@ struct bench_data {
     }
 };
 
+void alloc_pinned_db_table_cpu(db_table* t, uint64_t row_count)
+{
+    CUDA_TRY(cudaMallocHost(&t->group_col, row_count * sizeof(uint64_t)));
+    CUDA_TRY(cudaMallocHost(&t->aggregate_col, row_count * sizeof(uint64_t)));
+}
+
+void free_pinned_db_table_cpu(db_table* t)
+{
+    CUDA_TRY(cudaFreeHost(t->aggregate_col));
+    CUDA_TRY(cudaFreeHost(t->group_col));
+}
+
 void alloc_db_table_cpu(db_table* t, uint64_t row_count)
 {
     t->group_col = (uint64_t*)malloc(row_count * sizeof(uint64_t));
@@ -184,8 +200,13 @@ void alloc_bench_data(bench_data* bd)
                            std::unordered_map<uint64_t, uint64_t>()));
     }
 
+#if DONT_WANT_PINNED_MEM
     alloc_db_table_cpu(&bd->input_cpu, BENCHMARK_ROWS_MAX);
     alloc_db_table_cpu(&bd->output_cpu, BENCHMARK_GROUPS_MAX);
+#else
+    alloc_pinned_db_table_cpu(&bd->input_cpu, BENCHMARK_ROWS_MAX);
+    alloc_pinned_db_table_cpu(&bd->output_cpu, BENCHMARK_GROUPS_MAX);
+#endif
 
     for (int i = 0; i < BENCHMARK_STREAMS_MAX; i++) {
         CUDA_TRY(cudaStreamCreate(&bd->streams[i]));
@@ -253,9 +274,13 @@ void free_bench_data(bench_data* bd)
         CUDA_TRY(cudaEventDestroy(bd->events[i]));
         CUDA_TRY(cudaStreamDestroy(bd->streams[i]));
     }
-
+#if DONT_WANT_PINNED_MEM
     free_db_table_cpu(&bd->output_cpu);
     free_db_table_cpu(&bd->input_cpu);
+#else
+    free_pinned_db_table_cpu(&bd->output_cpu);
+    free_pinned_db_table_cpu(&bd->input_cpu);
+#endif
 
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
         bd->expected_output[rcv].~unordered_map();
@@ -444,7 +469,7 @@ void write_bench_data_omp(
         }
     }
 
-    if (group_count < 0.3 * max_row_count) {
+    if (group_count < 0.01 * max_row_count) {
         // number of groups is comparatively small, merging sectios is cheap
 #pragma omp parallel for
         for (int t = 0; t < OMP_THREAD_COUNT; t++) {
@@ -507,29 +532,36 @@ void write_bench_data_omp(
         }
     }
     else {
-        // number of groups is large, merging is expensive.
-        // for this case we can't really do any better than single threaded
-        bd->expected_output[0].clear();
-        size_t last_row_count = 0;
+#pragma omp parallel for
         for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
-            size_t row_count = benchmark_row_count_variants[rcv];
-            for (uint64_t i = last_row_count; i < row_count; i++) {
+            size_t start = rcv ? benchmark_row_count_variants[rcv - 1] : 0;
+            size_t end = benchmark_row_count_variants[rcv];
+            auto& map = bd->expected_output[rcv];
+            map.clear();
+            for (uint64_t i = start; i < end; i++) {
                 uint64_t group = bd->input_cpu.group_col[i];
                 uint64_t val = bd->input_cpu.aggregate_col[i];
-                auto idx = bd->expected_output[rcv].find(group);
-                if (idx != bd->expected_output[rcv].end()) {
+                auto idx = map.find(group);
+                if (idx != map.end()) {
                     idx->second += val;
                 }
                 else {
-                    bd->expected_output[rcv][group] = val;
+                    map[group] = val;
                 }
             }
-            if (rcv + 1 < BENCHMARK_ROW_COUNT_VARIANT_COUNT) {
-                // for higher row count variants we can reuse the
-                // expected_output accumulated so far
-                bd->expected_output[rcv + 1] = bd->expected_output[rcv];
+        }
+        for (int rcv = 1; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
+            auto& prev = bd->expected_output[rcv - 1];
+            auto& map = bd->expected_output[rcv];
+            for (auto kv : prev) {
+                auto idx = map.find(kv.first);
+                if (idx != map.end()) {
+                    idx->second += kv.second;
+                }
+                else {
+                    map[kv.first] = kv.second;
+                }
             }
-            last_row_count = row_count;
         }
     }
 }
@@ -568,7 +600,7 @@ bool validate(bench_data* bd, int row_count_variant)
     faults.resize(OMP_THREAD_COUNT, 0);
     size_t row_count = bd->output_cpu.row_count;
     bool fault_occured = false;
-    if (row_count > (1 << 16)) {
+    if (row_count > (1 << 13)) {
         size_t stride = row_count / OMP_THREAD_COUNT;
         if (!stride) stride = row_count;
 #pragma omp parallel for
@@ -623,11 +655,12 @@ bool validate(bench_data* bd, int row_count_variant)
         }
     }
     if (fault_occured) {
+#if BIG_DATA
+        return false;
+#else
         for (size_t i : faults) {
             if (i == 0) continue;
-#if BIG_DATA
-            return false;
-#endif
+
             i--;
             uint64_t group = bd->output_cpu.group_col[i];
             auto expected = bd->expected_output[row_count_variant].find(group);
@@ -652,6 +685,7 @@ bool validate(bench_data* bd, int row_count_variant)
                 return false;
             }
         }
+#endif
     }
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
