@@ -81,7 +81,7 @@ const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
 
-#define BENCHMARK_ROWS_BITS_MAX 20
+#define BENCHMARK_ROWS_BITS_MAX 25
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
@@ -339,6 +339,7 @@ void write_bench_data_omp(
 
     size_t stride = group_count / OMP_THREAD_COUNT;
     if (!stride) stride = group_count;
+    // this works since generator stride is a power of two
     while (stride % GENERATOR_STRIDE != 0) stride *= 2;
 
 #pragma omp parallel for
@@ -563,39 +564,99 @@ void setup_bench_data(bench_data* bd, size_t group_count)
 bool validate(bench_data* bd, int row_count_variant)
 {
     bd->output_cpu.row_count = bd->data_gpu.output.row_count;
-    cudaMemcpy(
-        bd->output_cpu.group_col, bd->data_gpu.output.group_col,
-        bd->output_cpu.row_count * sizeof(uint64_t), cudaMemcpyDeviceToHost);
-    cudaMemcpy(
-        bd->output_cpu.aggregate_col, bd->data_gpu.output.aggregate_col,
-        bd->output_cpu.row_count * sizeof(uint64_t), cudaMemcpyDeviceToHost);
-#if (!BIG_DATA)
-    for (size_t i = 0; i < bd->output_cpu.row_count; i++) {
-        uint64_t group = bd->output_cpu.group_col[i];
-        auto expected = bd->expected_output[row_count_variant].find(group);
-        uint64_t got = bd->output_cpu.aggregate_col[i];
-        if (expected == bd->expected_output[row_count_variant].end()) {
-            fprintf(
-                stderr,
-                "validation failiure: found unexpected group %llu in output "
-                "index %llu\n",
-                group, i);
-            __builtin_trap();
-            return false;
+    std::vector<size_t> faults;
+    faults.resize(OMP_THREAD_COUNT, 0);
+    size_t row_count = bd->output_cpu.row_count;
+    bool fault_occured = false;
+    if (row_count > (1 << 16)) {
+        size_t stride = row_count / OMP_THREAD_COUNT;
+        if (!stride) stride = row_count;
+#pragma omp parallel for
+        for (int t = 0; t < OMP_THREAD_COUNT; t++) {
+            size_t start = t * stride;
+            if (start < row_count) {
+                size_t end = (t + 1) * stride;
+                if (end > row_count) end = row_count;
+                size_t byte_count = (end - start) * sizeof(uint64_t);
+                cudaMemcpy(
+                    bd->output_cpu.group_col + start,
+                    bd->data_gpu.output.group_col + start, byte_count,
+                    cudaMemcpyDeviceToHost);
+                cudaMemcpy(
+                    bd->output_cpu.aggregate_col + start,
+                    bd->data_gpu.output.aggregate_col + start, byte_count,
+                    cudaMemcpyDeviceToHost);
+
+                for (size_t i = start; i < end; i++) {
+                    uint64_t group = bd->output_cpu.group_col[i];
+                    auto expected =
+                        bd->expected_output[row_count_variant].find(group);
+                    uint64_t got = bd->output_cpu.aggregate_col[i];
+                    if (expected ==
+                            bd->expected_output[row_count_variant].end() ||
+                        expected->second != got) {
+                        faults[t] = i + 1;
+                        i = end;
+                        fault_occured = true;
+                    }
+                }
+            }
         }
-        else if (expected->second != got) {
-            fprintf(
-                stderr,
-                "validation failiure for group %llu: expected %llu, got "
-                "%llu\n",
-                group, expected->second, got);
-            __builtin_trap();
+    }
+    else {
+        cudaMemcpy(
+            bd->output_cpu.group_col, bd->data_gpu.output.group_col,
+            row_count * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+        cudaMemcpy(
+            bd->output_cpu.aggregate_col, bd->data_gpu.output.aggregate_col,
+            row_count * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+        for (size_t i = 0; i < row_count; i++) {
+            uint64_t group = bd->output_cpu.group_col[i];
+            auto expected = bd->expected_output[row_count_variant].find(group);
+            uint64_t got = bd->output_cpu.aggregate_col[i];
+            if (expected == bd->expected_output[row_count_variant].end() ||
+                expected->second != got) {
+                faults[0] = i + 1;
+                fault_occured = true;
+                break;
+            }
+        }
+    }
+    if (fault_occured) {
+        for (size_t i : faults) {
+            if (i == 0) continue;
+#if BIG_DATA
             return false;
+#endif
+            i--;
+            uint64_t group = bd->output_cpu.group_col[i];
+            auto expected = bd->expected_output[row_count_variant].find(group);
+            uint64_t got = bd->output_cpu.aggregate_col[i];
+            if (expected == bd->expected_output[row_count_variant].end()) {
+                fprintf(
+                    stderr,
+                    "validation failiure: found unexpected group %llu in "
+                    "output "
+                    "index %llu\n",
+                    group, i);
+                __builtin_trap();
+                return false;
+            }
+            else if (expected->second != got) {
+                fprintf(
+                    stderr,
+                    "validation failiure for group %llu: expected %llu, got "
+                    "%llu\n",
+                    group, expected->second, got);
+                __builtin_trap();
+                return false;
+            }
         }
     }
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
     if (bd->output_cpu.row_count != expected_output_row_count) {
+#if (!BIG_DATA)
         fprintf(
             stderr,
             "validation failiure: expected %llu different groups, got "
@@ -613,6 +674,7 @@ bool validate(bench_data* bd, int row_count_variant)
                 }
             }
         }
+#endif
         __builtin_trap();
         return false;
     }
