@@ -373,6 +373,7 @@ __global__ void kernel_block_cmp(
                 }
             }
         }
+        __syncthreads();
 
         idx += stride;
         base_idx += stride;
