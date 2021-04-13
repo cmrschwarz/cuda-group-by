@@ -179,10 +179,14 @@ def contains_col_val_mult(rows, coldict):
 
     return False
 
+def abort_plot(plot_name):
+    if os.path.isfile(plot_name):
+        os.remove(plot_name)
 
 # graph generators
 
 def throughput_over_group_count(data, log=False):
+    plot_name = "throughput_over_group_count" + ("_log" if log else "") +".png"
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
@@ -190,6 +194,10 @@ def throughput_over_group_count(data, log=False):
     ax.set_title(f"Throughput over Group Count (rowcount = {max_rowcount}, best in class)")
 
     rowcount_filtered = filter_col_val(data, ROW_COUNT_COL, max_rowcount)
+
+    if len(rowcount_filtered) == 0 or len(unique_col_vals(data, GROUP_COUNT_COL)) < 2:
+        abort_plot(plot_name)
+        return
 
     by_approaches = classify(rowcount_filtered, APPROACH_COL)
 
@@ -217,9 +225,10 @@ def throughput_over_group_count(data, log=False):
     else:
         ax.set_ylim(0)
     ax.legend()
-    fig.savefig("throughput_over_group_count" + ("_log" if log else "") +".png")
+    fig.savefig(plot_name)
 
 def throughput_over_stream_count(data, group_count):
+    plot_name = f"throughput_over_stream_count_gc{group_count}.png"
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("stream count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
@@ -228,6 +237,10 @@ def throughput_over_stream_count(data, group_count):
 
     rowcount_filtered = filter_col_val(data, ROW_COUNT_COL, max_rowcount)
     groupcount_filtered = filter_col_val(rowcount_filtered, GROUP_COUNT_COL, group_count)
+
+    if len(groupcount_filtered) == 0 or len(unique_col_vals(data, STREAM_COUNT_COL)) < 2:
+        abort_plot(plot_name)
+        return
 
     by_approaches = classify(groupcount_filtered, APPROACH_COL)
 
@@ -248,11 +261,22 @@ def throughput_over_stream_count(data, group_count):
     ax.set_xticks(unique_col_vals(data, STREAM_COUNT_COL))
     ax.set_ylim(0)
     ax.legend()
-    fig.savefig(f"throughput_over_stream_count_gc{group_count}.png")
+    fig.savefig(plot_name)
 
 def grid_dim_block_dim_failiure_heatmap(data, approach, group_count=None, stream_count=None):
     assert((group_count is None) != (stream_count is None)) 
+    plot_name = (
+        f"{approach}_grid_block_failiure_heatmap_over_rowcount_and_" 
+        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
+        + ".png"
+    )
+    
     filtered = filter_col_val(data, APPROACH_COL, approach)
+
+    if len(filtered) == 0:
+        abort_plot(plot_name)
+        return
+
     colormap = LinearSegmentedColormap.from_list(
         "failiure", ["lawngreen", "gold", "orange", "r"]
     )
@@ -281,6 +305,10 @@ def grid_dim_block_dim_failiure_heatmap(data, approach, group_count=None, stream
             len(rowcount_vals) * len(unique_col_vals(filtered, BLOCK_DIM_COL))
         ),
     )
+    if len(rowcount_vals) == 1 and len(x_axis_vals) == 1:
+        # fix the api not returning an array in this case
+        axes = [[axes]]
+
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
         for (col_id, xv) in enumerate(x_axis_vals):
@@ -324,14 +352,16 @@ def grid_dim_block_dim_failiure_heatmap(data, approach, group_count=None, stream
             ax.set_xticklabels(grid_dim_vals)
             ax.set_yticklabels(block_dim_vals)
     fig.tight_layout(h_pad=2)
-    fig.savefig(
-        f"{approach}_grid_block_failiure_heatmap_over_rowcount_and_" 
-        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
-        + ".png",
-        bbox_inches="tight")
+    fig.savefig(plot_name, bbox_inches="tight")
 
 def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=None):
     assert((group_count is None) != (stream_count is None)) 
+
+    plot_name = (
+        f"{approach}_grid_block_heatmap_over_rowcount_and_" 
+        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
+        + ".png"
+    )
     filtered = filter_col_val(data, APPROACH_COL, approach)
 
     if stream_count is not None:
@@ -340,6 +370,10 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
     else:
         x_axis_col = STREAM_COUNT_COL
         filtered = filter_col_val(filtered, GROUP_COUNT_COL, group_count)
+    
+    if len(filtered) == 0:
+        abort_plot(plot_name)
+        return
 
     # reversed so the highest value is at the top, not the bottom
     rowcount_vals = sorted(unique_col_vals(filtered, ROW_COUNT_COL), reverse=True)
@@ -410,13 +444,19 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
                 cax = make_axes_locatable(ax).append_axes("right", size="10%", pad=0.5)
                 fig.colorbar(im, cax=cax)
     fig.tight_layout(h_pad=2)
-    fig.savefig(
-        f"{approach}_grid_block_heatmap_over_rowcount_and_" 
-        + (f"group_count_sc_{stream_count}" if stream_count is not None else f"stream_count_gc{group_count}")
-        + ".png",
-        bbox_inches="tight")
+    fig.savefig(plot_name, bbox_inches="tight")
 
 def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
+    plot_name = (
+        ("relative_" if relative else "") 
+        + f"{col_str}_stddev_over_row_count_gc{group_count}.png"    
+    )
+    groupcount_filtered = filter_col_val(data, GROUP_COUNT_COL, group_count)
+  
+    if len(groupcount_filtered) == 0:
+        abort_plot(plot_name)
+        return 
+
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("row count")
     if relative:
@@ -427,7 +467,6 @@ def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_st
             f"{col_str} standard deviation" 
             + (f" ({col_unit})" if col_unit is not None else "")
         )
-    groupcount_filtered = filter_col_val(data, GROUP_COUNT_COL, group_count)
 
     ax.set_title(
         ("Relative " if relative else "") 
@@ -471,13 +510,16 @@ def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_st
     ax.set_xscale("log", basex=2)
     ax.set_xticks(unique_col_vals(data, ROW_COUNT_COL))
     ax.legend()
-    fig.savefig(
-        ("relative_" if relative else "") 
-        + f"{col_str}_stddev_over_row_count_gc{group_count}.png"
-    )
+    fig.savefig(plot_name)
 
 
 def runtime_over_group_size_barring_approaches_stacking_row_count(data):
+    plot_name = f"throughput_over_group_size_barring_approaches_stacking_row_count.png"
+    
+    if len(data) == 0:
+        abort_plot(plot_name)
+        return
+
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("runtime (ms)")
@@ -546,12 +588,22 @@ def runtime_over_group_size_barring_approaches_stacking_row_count(data):
     ax.set_xticklabels(sorted(bar_index_per_group_count.keys()))
     ax.legend()
     ax.set_yscale("log")
-    fig.savefig(f"throughput_over_group_size_barring_approaches_stacking_row_count.png")
+    fig.savefig(plot_name)
 
 def throughput_over_group_size_barring_row_count_stacking_approaches(data, logscale):
+    plot_name = (
+        f"throughput_over_group_size_barring_row_count_stacking_approaches" 
+        + ("_log" if logscale else "") 
+        + ".png"
+    )
+    if len(data) == 0:
+        abort_plot(plot_name)
+        return
+
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+
     #rowcounts = sorted(classify(data, ROW_COUNT_COL).keys())
     #rowcounts_str = ", ".join([str(rc) for rc in rowcounts])
     log_base = 10
@@ -568,8 +620,6 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
     else:
         graph_max_value *= 1.2  
 
-
- 
     graph_height = (transform(graph_max_value) - transform(graph_min_value))
     text_offset = 0.01
     split_diff = 0.01 * graph_height
@@ -692,11 +742,7 @@ def throughput_over_group_size_barring_row_count_stacking_approaches(data, logsc
         ax.set_yscale("log", basey=log_base)
     ax.set_ylim(top=graph_max_value)
     ax.legend()
-    fig.savefig(
-        f"throughput_over_group_size_barring_row_count_stacking_approaches" 
-        + ("_log" if logscale else "") 
-        + ".png"
-    )
+    fig.savefig(plot_name)
 
 
 def read_csv(path):
@@ -736,6 +782,7 @@ def read_csv(path):
             data_row[THROUGHPUT_COL] = (1000. * DB_ROW_SIZE_BYTES * data_row[ROW_COUNT_COL]) / data_row[TIME_MS_COL] / 2**30
             data.append(data_row)
     return data
+
 
 def parallel(fns):
     processes=[]
@@ -777,6 +824,7 @@ def main():
     if len(args) > 1:
         input_path = args[1]
     else:
+        #input_path="./build/bench.csv"
         input_path="bench.csv"
 
     if len(args) > 2:
@@ -824,9 +872,10 @@ def main():
                 slow_jobs.append(
                     lambda ap=ap: grid_dim_block_dim_failiure_heatmap(data_raw, ap, stream_count=0)
                 )
-        jobs = jobs + slow_jobs
+        jobs = slow_jobs + jobs  
     
     parallel(jobs)
+    #sequential(jobs)
 
 if __name__ == "__main__":
     main()

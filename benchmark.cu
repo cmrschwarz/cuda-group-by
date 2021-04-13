@@ -8,9 +8,17 @@
 #include <iomanip>
 
 // to disable openmp even if available
-#define DONT_WANT_OPENMP false
+#define DONT_WANT_OPENMP true
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
+// set to false to reduce data size for debugging
+#define BIG_DATA false
+// use small group values to ease debugging
+#define SMALL_GROUP_VALS false
+// use small aggregate values to ease debugging
+#define SMALL_AGGREGATE_VALS true
+// continue in case of a validation failiure
+#define ALLOW_FAILIURE true
 
 #if defined(_OPENMP) && !(DONT_WANT_OPENMP)
 #include <omp.h>
@@ -19,17 +27,15 @@
 #define USE_OPENMP false
 #endif
 
-int OMP_THREAD_COUNT = 0;
-
-#define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
-#define ENABLE_APPROACH_WARP_CMP true
+#define ENABLE_APPROACH_HASHTABLE false
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
+#define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
 #define ENABLE_BLOCK_CMP_OLD true
 
@@ -61,9 +67,6 @@ int OMP_THREAD_COUNT = 0;
 #include "throughput_test.cuh"
 #endif
 
-// set to false to reduce data size for debugging
-#define BIG_DATA false
-
 #if BIG_DATA
 #define ITERATION_COUNT 5
 #else
@@ -85,24 +88,24 @@ const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
 
-#define BENCHMARK_ROWS_BITS_MAX 25
+#define BENCHMARK_ROWS_BITS_MAX 17
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
-const size_t benchmark_row_count_variants[] = {
-    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
-// const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
+// const size_t benchmark_row_count_variants[] = {
+//    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
+const int benchmark_gpu_block_dim_variants[] = {0, 32, 128, 512};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
                                                512, 1024, 2048, 4096, 8192};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
+const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512, 1024};
 #endif
 
 #if BIG_DATA
@@ -111,13 +114,20 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #define BENCHMARK_GROUP_BITS_MAX 20
 #endif
 
-#if BIG_DATA
-#define BENCHMARK_GROUP_VALS_MIN std::numeric_limits<uint64_t>::min()
-#define BENCHMARK_GROUP_VALS_MAX std::numeric_limits<uint64_t>::max()
-#else
-
+#if SMALL_GROUP_VALS
 #define BENCHMARK_GROUP_VALS_MIN 0
 #define BENCHMARK_GROUP_VALS_MAX (((size_t)1 << BENCHMARK_GROUP_BITS_MAX) - 1)
+#else
+#define BENCHMARK_GROUP_VALS_MIN std::numeric_limits<uint64_t>::min()
+#define BENCHMARK_GROUP_VALS_MAX std::numeric_limits<uint64_t>::max()
+#endif
+
+#if SMALL_AGGREGATE_VALS
+#define BENCHMARK_AGGREGATE_VALS_MIN 0
+#define BENCHMARK_AGGREGATE_VALS_MAX 100
+#else
+#define BENCHMARK_AGGREGATE_VALS_MIN std::numeric_limits<uint64_t>::min()
+#define BENCHMARK_AGGREGATE_VALS_MAX std::numeric_limits<uint64_t>::max()
 #endif
 
 #define BENCHMARK_GROUPS_MAX ((size_t)1 << BENCHMARK_GROUP_BITS_MAX)
@@ -130,6 +140,8 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
     ARRAY_SIZE(benchmark_row_count_variants)
 #define BENCHMARK_STREAM_COUNT_VARIANT_COUNT                                   \
     ARRAY_SIZE(benchmark_stream_count_variants)
+
+int OMP_THREAD_COUNT = 0;
 
 struct bench_data {
     union { // anonymous unions to disable RAII
@@ -292,11 +304,12 @@ void write_bench_data(
     bench_data* bd, size_t group_count, size_t generator_base_seed)
 {
     std::mt19937_64 generator{};
+    std::uniform_int_distribution<uint64_t> group_vals_dist{
+        BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
 
-    std::uniform_int_distribution<uint64_t> uint_rng{BENCHMARK_GROUP_VALS_MIN,
-                                                     BENCHMARK_GROUP_VALS_MAX};
-
-    std::uniform_int_distribution<uint64_t> group_rng{0, group_count - 1};
+    std::uniform_int_distribution<uint64_t> agg_vals_dist{
+        BENCHMARK_AGGREGATE_VALS_MIN, BENCHMARK_AGGREGATE_VALS_MAX};
+    std::uniform_int_distribution<uint64_t> group_idx_dist{0, group_count - 1};
 
     std::vector<uint64_t> groups{};
     groups.reserve(group_count);
@@ -307,7 +320,7 @@ void write_bench_data(
         if (i % GENERATOR_STRIDE == 0) {
             generator = std::mt19937_64(generator_base_seed + i);
         }
-        groups.push_back(uint_rng(generator));
+        groups.push_back(group_vals_dist(generator));
     }
 
     // initialize input table with random group and aggregate values
@@ -320,8 +333,8 @@ void write_bench_data(
             if (i % GENERATOR_STRIDE == 0) {
                 generator = std::mt19937_64(generator_base_seed + i);
             }
-            uint64_t group = groups[group_rng(generator)];
-            uint64_t val = uint_rng(generator);
+            uint64_t group = groups[group_idx_dist(generator)];
+            uint64_t val = agg_vals_dist(generator);
             bd->input_cpu.group_col[i] = group;
             bd->input_cpu.aggregate_col[i] = val;
             auto idx = bd->expected_output[rcv].find(group);
@@ -345,10 +358,12 @@ template <size_t GENERATOR_STRIDE>
 void write_bench_data_omp(
     bench_data* bd, size_t group_count, size_t generator_base_seed)
 {
-    std::uniform_int_distribution<uint64_t> uint_rng{BENCHMARK_GROUP_VALS_MIN,
-                                                     BENCHMARK_GROUP_VALS_MAX};
+    std::uniform_int_distribution<uint64_t> group_vals_dist{
+        BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
 
-    std::uniform_int_distribution<uint64_t> group_rng{0, group_count - 1};
+    std::uniform_int_distribution<uint64_t> agg_vals_dist{
+        BENCHMARK_AGGREGATE_VALS_MIN, BENCHMARK_AGGREGATE_VALS_MAX};
+    std::uniform_int_distribution<uint64_t> group_idx_dist{0, group_count - 1};
     size_t max_row_count =
         benchmark_row_count_variants[BENCHMARK_ROW_COUNT_VARIANT_COUNT - 1];
 
@@ -377,7 +392,7 @@ void write_bench_data_omp(
                 if (i % GENERATOR_STRIDE == 0) {
                     generators[t] = std::mt19937_64(generator_base_seed + i);
                 }
-                groups[i] = uint_rng(generators[t]);
+                groups[i] = group_vals_dist(generators[t]);
             }
         }
     }
@@ -461,8 +476,9 @@ void write_bench_data_omp(
                             std::mt19937_64(generator_base_seed + i);
                     }
                     bd->input_cpu.group_col[i] =
-                        groups[group_rng(generators[t])];
-                    bd->input_cpu.aggregate_col[i] = uint_rng(generators[t]);
+                        groups[group_idx_dist(generators[t])];
+                    bd->input_cpu.aggregate_col[i] =
+                        agg_vals_dist(generators[t]);
                 }
                 sid++;
             }
@@ -655,7 +671,7 @@ bool validate(bench_data* bd, int row_count_variant)
         }
     }
     if (fault_occured) {
-#if BIG_DATA
+#if ALLOW_FAILIURE
         return false;
 #else
         for (size_t i : faults) {
@@ -690,7 +706,7 @@ bool validate(bench_data* bd, int row_count_variant)
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
     if (bd->output_cpu.row_count != expected_output_row_count) {
-#if (!BIG_DATA)
+#if (!ALLOW_FAILIURE)
         fprintf(
             stderr,
             "validation failiure: expected %llu different groups, got "
@@ -708,8 +724,8 @@ bool validate(bench_data* bd, int row_count_variant)
                 }
             }
         }
-#endif
         __builtin_trap();
+#endif
         return false;
     }
     return true;
@@ -729,7 +745,7 @@ void record_time_and_validate(
         success = validate(bd, row_count_variant);
     }
 
-#if (!BIG_DATA)
+#if (!ALLOW_FAILIURE)
     RELASE_ASSERT(success);
 #endif
     // the flush on std::endl is intentional to allow for tail -f style
@@ -906,10 +922,11 @@ int main()
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
 
-    run_benchmarks_for_group_bit_count<1>(&bench_data);
-    run_benchmarks_for_group_bit_count<3>(&bench_data);
-    run_benchmarks_for_group_bit_count<5>(&bench_data);
-    run_benchmarks_for_group_bit_count<7>(&bench_data);
+    /* run_benchmarks_for_group_bit_count<1>(&bench_data);
+     run_benchmarks_for_group_bit_count<3>(&bench_data);
+     run_benchmarks_for_group_bit_count<5>(&bench_data);
+     run_benchmarks_for_group_bit_count<7>(&bench_data);
+     run_benchmarks_for_group_bit_count<9>(&bench_data);*/
     run_benchmarks_for_group_bit_count<9>(&bench_data);
 
 #if BIG_DATA
