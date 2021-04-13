@@ -8,7 +8,7 @@
 #include <iomanip>
 
 // to disable openmp even if available
-#define DONT_WANT_OPENMP true
+#define DONT_WANT_OPENMP false
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
 // set to false to reduce data size for debugging
@@ -16,7 +16,7 @@
 // use small group values to ease debugging
 #define SMALL_GROUP_VALS false
 // use small aggregate values to ease debugging
-#define SMALL_AGGREGATE_VALS true
+#define SMALL_AGGREGATE_VALS false
 // continue in case of a validation failiure
 #define ALLOW_FAILIURE true
 
@@ -27,13 +27,13 @@
 #define USE_OPENMP false
 #endif
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
-#define ENABLE_APPROACH_WARP_CMP false
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
 #define ENABLE_APPROACH_BLOCK_CMP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
@@ -88,11 +88,11 @@ const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
 
-#define BENCHMARK_ROWS_BITS_MAX 17
+#define BENCHMARK_ROWS_BITS_MAX 25
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
-// const size_t benchmark_row_count_variants[] = {
-//    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
-const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
+const size_t benchmark_row_count_variants[] = {
+    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+// const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
@@ -807,6 +807,14 @@ void run_approaches(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "block_cmp");
 
+#if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
+        group_by_block_cmp<GROUP_BIT_COUNT, false, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "block_cmp_naive_writeout");
+#endif
 #if ENABLE_BLOCK_CMP_OLD
         group_by_block_cmp<GROUP_BIT_COUNT, false, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
@@ -814,7 +822,6 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "block_cmp_old");
-#endif
 #if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
         group_by_block_cmp<GROUP_BIT_COUNT, true, true>(
             &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
@@ -822,6 +829,7 @@ void run_approaches(
         record_time_and_validate(
             bd, GROUP_COUNT, row_count_variant, grid_dim, block_dim,
             stream_count, iteration, "block_cmp_old_naive_writeout");
+#endif
 #endif
     }
 #endif
@@ -922,11 +930,10 @@ int main()
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
 
-    /* run_benchmarks_for_group_bit_count<1>(&bench_data);
-     run_benchmarks_for_group_bit_count<3>(&bench_data);
-     run_benchmarks_for_group_bit_count<5>(&bench_data);
-     run_benchmarks_for_group_bit_count<7>(&bench_data);
-     run_benchmarks_for_group_bit_count<9>(&bench_data);*/
+    run_benchmarks_for_group_bit_count<1>(&bench_data);
+    run_benchmarks_for_group_bit_count<3>(&bench_data);
+    run_benchmarks_for_group_bit_count<5>(&bench_data);
+    run_benchmarks_for_group_bit_count<7>(&bench_data);
     run_benchmarks_for_group_bit_count<9>(&bench_data);
 
 #if BIG_DATA

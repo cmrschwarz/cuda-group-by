@@ -46,6 +46,7 @@ approach_colors = {
     "hashtable_eager_out_idx": "green",
     "warp_cmp": "gold",
     "block_cmp": "deepskyblue",
+    "block_cmp_naive_writeout": "yellow",
     "block_cmp_old": "navy",
     "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
@@ -61,12 +62,13 @@ approach_markers = {
     "warp_cmp": "<",
     "block_cmp": "x",
     "block_cmp_old": "1",
+    "block_cmp_naive_writeout": "2",
     "block_cmp_old_naive_writeout": "*",
     "shared_mem_hashtable": ">",
     "cub_radix_sort": "o",
     "throughput_test": "+",
-    "per_thread_hashtable": "2",
-    "per_thread_hashtable_bank_optimized": "3",
+    "per_thread_hashtable": "3",
+    "per_thread_hashtable_bank_optimized": "4",
 }
 
 

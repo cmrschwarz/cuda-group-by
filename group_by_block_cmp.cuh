@@ -77,19 +77,24 @@ __device__ void block_cmp_naive_write_out(
             thread_groups, thread_aggregates, &groups_in_thread,
             empty_group_slot);
         if (GROUPS_DISTINCT) {
-            groups_found--;
+            (*groups_found)--;
         }
         else {
             atomicSub(groups_found, 1);
         }
     }
-    for (size_t i = 0; i < (size_t)1 << MAX_GROUP_BITS; i++) {
+    // we need i to be signed so we can do i-- without worrying
+    // about the 0'th iteration overflowing
+    size_t i = 0;
+    while (i < (int64_t)1 << MAX_GROUP_BITS) {
         __syncthreads();
-        if (groups_found == 0) break;
+        if (*groups_found == 0) break;
         if (threadIdx.x == 0) {
             curr_group = output.group_col[i];
         }
         __syncthreads();
+        // we use this curr_group thing instead of reading from every
+        // thread so all threads agree on the value we got
         uint64_t group = curr_group;
         // if the empty group occurs
         // we can be assured that this will happen at some point
@@ -104,10 +109,10 @@ __device__ void block_cmp_naive_write_out(
 
             if (groups_in_thread) {
                 int last_group_idx = groups_in_thread - 1;
-                group = atomicCAS(
+                uint64_t cmp_group = atomicCAS(
                     (cudaUInt64_t*)&output.group_col[i], BCMP_EMPTY_GROUP_VALUE,
                     thread_groups[last_group_idx]);
-                if (group == BCMP_EMPTY_GROUP_VALUE) {
+                if (cmp_group == BCMP_EMPTY_GROUP_VALUE) {
                     // this must be atomic because we are already racing
                     // against other blocks
                     atomicAdd(
@@ -116,7 +121,7 @@ __device__ void block_cmp_naive_write_out(
                     race_won = true;
                     groups_in_thread--;
                     if (GROUPS_DISTINCT) {
-                        groups_found--;
+                        (*groups_found)--;
                     }
                     else {
                         atomicSub(groups_found, 1);
@@ -132,15 +137,12 @@ __device__ void block_cmp_naive_write_out(
                 if (threadIdx.x == 0) {
                     race_won = false;
                 }
-                if (GROUPS_DISTINCT) continue;
-            }
-            else {
-                if (threadIdx.x == 0) {
-                    curr_group = output.group_col[i];
+                if (GROUPS_DISTINCT) {
+                    i++;
+                    continue;
                 }
-                __syncthreads();
-                group = curr_group;
             }
+            continue;
         }
         for (int j = 0; j < groups_in_thread; j++) {
             if (thread_groups[j] == group) {
@@ -156,7 +158,7 @@ __device__ void block_cmp_naive_write_out(
                     // this is not racing since
                     // there is a syncthreads afterwards and only one thread can
                     // get here per iteration
-                    groups_found--;
+                    (*groups_found)--;
                 }
                 else {
                     atomicSub(groups_found, 1);
@@ -166,8 +168,7 @@ __device__ void block_cmp_naive_write_out(
                 // groups cannot match on this i
             }
         }
-        // so the groups_found check in the next iteration is not racing
-        __syncthreads();
+        i++;
     }
 }
 
@@ -262,7 +263,6 @@ __global__ void kernel_block_cmp(
         // if our thread got handed out a group responsibility,
         // check if nobody else before us got assigned the same group
         // if not, take on responsibility, if yes, yield resp. to the lower tid
-        __syncthreads();
         int handout_id = handout_ids[threadIdx.x];
         bool handout_assigned = false;
         if (handout_id != -1) {
@@ -345,6 +345,9 @@ __global__ void kernel_block_cmp(
             thread_aggregates[thread_group_count] = aggregates[handout_id];
             thread_group_count++;
         }
+        // necessary so the next iteration can't trash our
+        // groups[handout_id] reads
+        __syncthreads();
 
         // if the last thread in the warp was assigned a group, advance
         // to the satisfied warp phase
@@ -433,7 +436,8 @@ __global__ void kernel_block_cmp_old(
     int groups_in_thread = 0;
     int empty_group_slot = -1;
     (void)empty_group_slot; // prevent unused warning for !NAIVE_WRITEOUT
-    while (rows_read == blockDim.x) {
+    int rows_to_go; // local mirror of rows_read
+    do {
         // read in one row per thread
         if (idx >= input.row_count) {
             // the last thread is guaranteed to overflow if any thread does
@@ -453,10 +457,11 @@ __global__ void kernel_block_cmp_old(
             idx += stride;
         }
         __syncthreads();
+        rows_to_go = rows_read;
 
         // consume on row at a time
         // TODO: maybe consume multiple to reduce the number of syncthreads
-        for (int i = 0; i < rows_read; i++) {
+        for (int i = 0; i < rows_to_go; i++) {
             uint64_t group = groups[i];
             for (int j = 0; j < groups_in_thread; j++) {
                 if (group == thread_groups[j]) {
@@ -492,8 +497,12 @@ __global__ void kernel_block_cmp_old(
                 groups_found++;
             }
         }
-    }
+    } while (rows_to_go == blockDim.x);
     if (NAIVE_WRITEOUT) {
+        // so groups_found is valid here
+        // not strictly required but good for sanity reasons
+        // (no race reasoning across function boundaries)
+        __syncthreads();
         block_cmp_naive_write_out<MAX_GROUP_BITS, true>(
             output, &groups_found, groups_in_thread, thread_groups,
             thread_aggregates, empty_group_slot);
