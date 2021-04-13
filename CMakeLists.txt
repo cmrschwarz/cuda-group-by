@@ -12,6 +12,13 @@ option(
     ON
 )
 
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
+
+
 # we use this for some ifdefs to make 
 # nvcc benchmark.cu work without any parameters
 target_compile_definitions(cuda-group-by PRIVATE CUDA_GROUP_BY_CMAKE_BUILD)

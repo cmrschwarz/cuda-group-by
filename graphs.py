@@ -815,7 +815,7 @@ def main():
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
     ]
     slow_jobs = [
-        lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", stream_count=0),
+        lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", group_count=32),
     ]
     if(gen_all):
         #generate a failiure heatmap for all approaches containing failiures

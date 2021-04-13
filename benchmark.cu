@@ -7,17 +7,27 @@
 #include <fstream>
 #include <iomanip>
 
-#define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
-#define ENABLE_APPROACH_WARP_CMP true
+// to disable openmp even if available add && false
+#ifdef _OPENMP
+#include <omp.h>
+#define USE_OPENMP true
+#else
+#define USE_OPENMP false
+#endif
+
+int OMP_THREAD_COUNT = 0;
+
+#define ENABLE_APPROACH_HASHTABLE false
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
+#define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP true
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
-#define ENABLE_BLOCK_CMP_OLD true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
+#define ENABLE_BLOCK_CMP_OLD false
 
 #if ENABLE_APPROACH_HASHTABLE
 #include "group_by_hashtable.cuh"
@@ -48,7 +58,7 @@
 #endif
 
 // set to false to reduce data size for debugging
-#define BIG_DATA true
+#define BIG_DATA false
 
 #if BIG_DATA
 #define ITERATION_COUNT 5
@@ -70,23 +80,25 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
-#define BENCHMARK_ROWS_BITS_MAX 25
+
+#define BENCHMARK_ROWS_BITS_MAX 20
 #define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128, 256, 512, 1024};
 #else
-const int benchmark_gpu_block_dim_variants[] = {0, 32, 128};
+const int benchmark_gpu_block_dim_variants[] = {0, 32, 64, 128};
 #endif
 
 #if BIG_DATA
 const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
                                                512, 1024, 2048, 4096, 8192};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
+const int benchmark_gpu_grid_dim_variants[] = {0, 64, 128, 512};
 #endif
 
 #if BIG_DATA
@@ -99,6 +111,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #define BENCHMARK_GROUP_VALS_MIN std::numeric_limits<uint64_t>::min()
 #define BENCHMARK_GROUP_VALS_MAX std::numeric_limits<uint64_t>::max()
 #else
+
 #define BENCHMARK_GROUP_VALS_MIN 0
 #define BENCHMARK_GROUP_VALS_MAX (((size_t)1 << BENCHMARK_GROUP_BITS_MAX) - 1)
 #endif
@@ -249,9 +262,11 @@ void free_bench_data(bench_data* bd)
     }
 }
 
-void setup_bench_data(bench_data* bd, size_t group_count)
+template <size_t GENERATOR_STRIDE>
+void write_bench_data(
+    bench_data* bd, size_t group_count, size_t generator_base_seed)
 {
-    std::mt19937_64 generator{1337};
+    std::mt19937_64 generator{};
 
     std::uniform_int_distribution<uint64_t> uint_rng{BENCHMARK_GROUP_VALS_MIN,
                                                      BENCHMARK_GROUP_VALS_MAX};
@@ -264,23 +279,29 @@ void setup_bench_data(bench_data* bd, size_t group_count)
     // generate group_count different group values
     // (duplicates just mean less groups, no big deal)
     for (uint64_t i = 0; i < group_count; i++) {
+        if (i % GENERATOR_STRIDE == 0) {
+            generator = std::mt19937_64(generator_base_seed + i);
+        }
         groups.push_back(uint_rng(generator));
     }
 
     // initialize input table with random group and aggregate values
-    // and increase the aggregate values in expected_output accordingly
+    // and increase the ag
     bd->expected_output[0].clear();
     size_t last_row_count = 0;
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
         size_t row_count = benchmark_row_count_variants[rcv];
         for (uint64_t i = last_row_count; i < row_count; i++) {
+            if (i % GENERATOR_STRIDE == 0) {
+                generator = std::mt19937_64(generator_base_seed + i);
+            }
             uint64_t group = groups[group_rng(generator)];
             uint64_t val = uint_rng(generator);
             bd->input_cpu.group_col[i] = group;
             bd->input_cpu.aggregate_col[i] = val;
-            if (bd->expected_output[rcv].find(group) !=
-                bd->expected_output[rcv].end()) {
-                bd->expected_output[rcv][group] += val;
+            auto idx = bd->expected_output[rcv].find(group);
+            if (idx != bd->expected_output[rcv].end()) {
+                idx->second += val;
             }
             else {
                 bd->expected_output[rcv][group] = val;
@@ -293,9 +314,244 @@ void setup_bench_data(bench_data* bd, size_t group_count)
         }
         last_row_count = row_count;
     }
-    // store the final row count
-    bd->input_cpu.row_count = last_row_count;
+}
 
+template <size_t GENERATOR_STRIDE>
+void write_bench_data_omp(
+    bench_data* bd, size_t group_count, size_t generator_base_seed)
+{
+    std::uniform_int_distribution<uint64_t> uint_rng{BENCHMARK_GROUP_VALS_MIN,
+                                                     BENCHMARK_GROUP_VALS_MAX};
+
+    std::uniform_int_distribution<uint64_t> group_rng{0, group_count - 1};
+    size_t max_row_count =
+        benchmark_row_count_variants[BENCHMARK_ROW_COUNT_VARIANT_COUNT - 1];
+
+    // since these generator types are huge (2504 bytes on my machine)
+    // im not to worried about false sharing
+    std::vector<std::mt19937_64> generators;
+    generators.resize(OMP_THREAD_COUNT);
+
+    // going back to the 90's to get a dynamic array that does't zero
+    // initialize. *insert Thorvalds quote here*
+    uint64_t* groups = (uint64_t*)malloc(group_count * sizeof(uint64_t));
+    RELASE_ASSERT(groups);
+
+    size_t stride = group_count / OMP_THREAD_COUNT;
+    if (!stride) stride = group_count;
+    while (stride % GENERATOR_STRIDE != 0) stride *= 2;
+
+#pragma omp parallel for
+    for (int t = 0; t < OMP_THREAD_COUNT; t++) {
+        size_t start = t * stride;
+        if (start < group_count) {
+            size_t end = (t + 1) * stride;
+            if (end > group_count) end = group_count;
+            for (size_t i = start; i < end; i++) {
+                if (i % GENERATOR_STRIDE == 0) {
+                    generators[t] = std::mt19937_64(generator_base_seed + i);
+                }
+                groups[i] = uint_rng(generators[t]);
+            }
+        }
+    }
+
+    typedef std::tuple<
+        std::unordered_map<uint64_t, uint64_t>, size_t, size_t, int, int>
+        section;
+    constexpr int map_idx = 0;
+    constexpr int start_idx = 1;
+    constexpr int end_idx = 2;
+    constexpr int rcv_idx = 3;
+    constexpr int thrd_idx = 4;
+    std::vector<section> sections;
+
+    for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
+        section sec = section{};
+        std::get<start_idx>(sec) =
+            rcv ? benchmark_row_count_variants[rcv - 1] : 0;
+        std::get<end_idx>(sec) = benchmark_row_count_variants[rcv];
+        std::get<rcv_idx>(sec) = rcv;
+        sections.push_back(std::move(sec));
+    }
+    size_t thread_work = max_row_count / OMP_THREAD_COUNT;
+    int i = 0;
+    int t = 0;
+    size_t t_work = 0;
+    const float slack = 0.1;
+    while (true) {
+        if (t_work > (1 - slack) * thread_work) t++;
+        if (t == OMP_THREAD_COUNT) break;
+        size_t work =
+            std::get<end_idx>(sections[i]) - std::get<start_idx>(sections[i]);
+        if (t_work + work < thread_work * (1 + slack)) {
+            std::get<thrd_idx>(sections[i]) = t;
+            t_work += work;
+            i++;
+            continue;
+        }
+
+        section sec_split = sections[i];
+        std::get<end_idx>(sec_split) = std::get<end_idx>(sections[i]);
+        std::get<start_idx>(sec_split) =
+            std::get<start_idx>(sections[i]) + thread_work - t_work;
+        std::get<end_idx>(sections[i]) = std::get<start_idx>(sec_split);
+        std::get<thrd_idx>(sections[i]) = t;
+        sections.insert(sections.begin() + i + 1, std::move(sec_split));
+        t++;
+        i++;
+        t_work = 0;
+    }
+    while (i < sections.size()) {
+        std::get<thrd_idx>(sections[i]) = OMP_THREAD_COUNT - 1;
+        i++;
+    }
+
+#pragma omp parallel for
+    for (int t = 0; t < OMP_THREAD_COUNT; t++) {
+        int sid = -1;
+        for (int i = 0; i < sections.size(); i++) {
+            int tid = std::get<thrd_idx>(sections[i]);
+            if (tid >= t) {
+                if (tid == t) sid = i;
+                break;
+            }
+        }
+        if (sid != -1) {
+            size_t start = std::get<start_idx>(sections[sid]);
+            size_t gen_base = start / GENERATOR_STRIDE * GENERATOR_STRIDE;
+            if (gen_base != start) {
+                generators[t] = std::mt19937_64(generator_base_seed + gen_base);
+                // discard twice since we use the generator for group and value
+                generators[t].discard((start - gen_base) * 2);
+            }
+            while (sid < sections.size() &&
+                   std::get<thrd_idx>(sections[sid]) == t) {
+                size_t start = std::get<start_idx>(sections[sid]);
+                size_t end = std::get<end_idx>(sections[sid]);
+                for (uint64_t i = start; i < end; i++) {
+                    if (i % GENERATOR_STRIDE == 0) {
+                        generators[t] =
+                            std::mt19937_64(generator_base_seed + i);
+                    }
+                    bd->input_cpu.group_col[i] =
+                        groups[group_rng(generators[t])];
+                    bd->input_cpu.aggregate_col[i] = uint_rng(generators[t]);
+                }
+                sid++;
+            }
+        }
+    }
+
+    if (group_count < 0.3 * max_row_count) {
+        // number of groups is comparatively small, merging sectios is cheap
+#pragma omp parallel for
+        for (int t = 0; t < OMP_THREAD_COUNT; t++) {
+            int sid = -1;
+            for (int i = 0; i < sections.size(); i++) {
+                int tid = std::get<thrd_idx>(sections[i]);
+                if (tid >= t) {
+                    if (tid == t) sid = i;
+                    break;
+                }
+            }
+            if (sid != -1) {
+                while (sid < sections.size() &&
+                       std::get<thrd_idx>(sections[sid]) == t) {
+                    size_t start = std::get<start_idx>(sections[sid]);
+                    size_t end = std::get<end_idx>(sections[sid]);
+                    auto& map = std::get<map_idx>(sections[sid]);
+                    for (uint64_t i = start; i < end; i++) {
+                        uint64_t group = bd->input_cpu.group_col[i];
+                        uint64_t val = bd->input_cpu.aggregate_col[i];
+                        auto idx = map.find(group);
+                        if (idx != map.end()) {
+                            idx->second += val;
+                        }
+                        else {
+                            map[group] = val;
+                        }
+                    }
+                    sid++;
+                }
+            }
+        }
+#pragma omp parallel for
+        for (int t = 0; t < OMP_THREAD_COUNT; t++) {
+            for (int rcv_id = t; rcv_id < BENCHMARK_ROW_COUNT_VARIANT_COUNT;
+                 rcv_id += OMP_THREAD_COUNT) {
+                bd->expected_output[rcv_id].clear();
+                int s_end = 0;
+                bool found = false;
+                while (s_end < sections.size()) {
+                    int rcv = std::get<rcv_idx>(sections[s_end]);
+                    if (found && rcv != rcv_id) break;
+                    if (rcv == rcv_id) found = true;
+                    s_end++;
+                }
+                auto& map = bd->expected_output[rcv_id];
+                for (int i = 0; i != s_end; i++) {
+                    auto& sec_map = std::get<map_idx>(sections[i]);
+                    for (auto kv : sec_map) {
+                        auto idx = map.find(kv.first);
+                        if (idx != map.end()) {
+                            idx->second += kv.second;
+                        }
+                        else {
+                            map[kv.first] = kv.second;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else {
+        // number of groups is large, merging is expensive.
+        // for this case we can't really do any better than single threaded
+        bd->expected_output[0].clear();
+        size_t last_row_count = 0;
+        for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
+            size_t row_count = benchmark_row_count_variants[rcv];
+            for (uint64_t i = last_row_count; i < row_count; i++) {
+                uint64_t group = bd->input_cpu.group_col[i];
+                uint64_t val = bd->input_cpu.aggregate_col[i];
+                auto idx = bd->expected_output[rcv].find(group);
+                if (idx != bd->expected_output[rcv].end()) {
+                    idx->second += val;
+                }
+                else {
+                    bd->expected_output[rcv][group] = val;
+                }
+            }
+            if (rcv + 1 < BENCHMARK_ROW_COUNT_VARIANT_COUNT) {
+                // for higher row count variants we can reuse the
+                // expected_output accumulated so far
+                bd->expected_output[rcv + 1] = bd->expected_output[rcv];
+            }
+            last_row_count = row_count;
+        }
+    }
+}
+
+void setup_bench_data(bench_data* bd, size_t group_count)
+{
+    // use static seeds for the generators to improve reproducability
+    // special care was also taken to make sure that OMP_THREAD_COUNT
+    // does not influence the results
+    constexpr size_t generator_base_seed = 1337;
+    constexpr size_t generator_stride = 1 << 15;
+
+    // completely separate the cases to make it more readable
+#if !USE_OPENMP
+    write_bench_data<generator_stride>(bd, group_count, generator_base_seed);
+#else
+    write_bench_data_omp<generator_stride>(
+        bd, group_count, generator_base_seed);
+#endif
+
+    // store the final row count
+    bd->input_cpu.row_count =
+        benchmark_row_count_variants[BENCHMARK_ROW_COUNT_VARIANT_COUNT - 1];
     // copy the input to the gpu
     CUDA_TRY(cudaMemcpy(
         bd->data_gpu.input.group_col, bd->input_cpu.group_col,
@@ -313,37 +569,33 @@ bool validate(bench_data* bd, int row_count_variant)
     cudaMemcpy(
         bd->output_cpu.aggregate_col, bd->data_gpu.output.aggregate_col,
         bd->output_cpu.row_count * sizeof(uint64_t), cudaMemcpyDeviceToHost);
+#if (!BIG_DATA)
     for (size_t i = 0; i < bd->output_cpu.row_count; i++) {
         uint64_t group = bd->output_cpu.group_col[i];
         auto expected = bd->expected_output[row_count_variant].find(group);
         uint64_t got = bd->output_cpu.aggregate_col[i];
         if (expected == bd->expected_output[row_count_variant].end()) {
-#if (!BIG_DATA)
             fprintf(
                 stderr,
                 "validation failiure: found unexpected group %llu in output "
                 "index %llu\n",
                 group, i);
             __builtin_trap();
-#endif
             return false;
         }
         else if (expected->second != got) {
-#if (!BIG_DATA)
             fprintf(
                 stderr,
                 "validation failiure for group %llu: expected %llu, got "
                 "%llu\n",
                 group, expected->second, got);
             __builtin_trap();
-#endif
             return false;
         }
     }
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
     if (bd->output_cpu.row_count != expected_output_row_count) {
-#if (!BIG_DATA)
         fprintf(
             stderr,
             "validation failiure: expected %llu different groups, got "
@@ -362,7 +614,6 @@ bool validate(bench_data* bd, int row_count_variant)
             }
         }
         __builtin_trap();
-#endif
         return false;
     }
     return true;
@@ -546,6 +797,11 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
 
 int main()
 {
+#if USE_OPENMP
+    OMP_THREAD_COUNT = omp_get_max_threads();
+#else
+    OMP_THREAD_COUNT = 1;
+#endif
     bench_data bench_data;
     alloc_bench_data(&bench_data);
     new (&bench_data.output_csv) std::ofstream{"bench.csv"};
