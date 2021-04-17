@@ -19,6 +19,8 @@
 #define SMALL_AGGREGATE_VALS false
 // continue in case of a validation failiure
 #define ALLOW_FAILIURE true
+// disable actual validation and just say "PASS"
+#define VALIDATION_OFF false
 
 #if defined(_OPENMP) && !(DONT_WANT_OPENMP)
 #    include <omp.h>
@@ -612,6 +614,7 @@ void setup_bench_data(bench_data* bd, size_t group_count)
 }
 bool validate(bench_data* bd, int row_count_variant)
 {
+#if (!VALIDATION_OFF)
     bd->output_cpu.row_count = bd->data_gpu.output.row_count;
     std::vector<size_t> faults;
     faults.resize(OMP_THREAD_COUNT, 0);
@@ -620,7 +623,7 @@ bool validate(bench_data* bd, int row_count_variant)
     if (row_count > (1 << 13)) {
         size_t stride = row_count / OMP_THREAD_COUNT;
         if (!stride) stride = row_count;
-#pragma omp parallel for
+#    pragma omp parallel for
         for (int t = 0; t < OMP_THREAD_COUNT; t++) {
             size_t start = t * stride;
             if (start < row_count) {
@@ -672,9 +675,9 @@ bool validate(bench_data* bd, int row_count_variant)
         }
     }
     if (fault_occured) {
-#if ALLOW_FAILIURE
+#    if ALLOW_FAILIURE
         return false;
-#else
+#    else
         for (size_t i : faults) {
             if (i == 0) continue;
 
@@ -702,12 +705,12 @@ bool validate(bench_data* bd, int row_count_variant)
                 return false;
             }
         }
-#endif
+#    endif
     }
     const size_t expected_output_row_count =
         bd->expected_output[row_count_variant].size();
     if (bd->output_cpu.row_count != expected_output_row_count) {
-#if (!ALLOW_FAILIURE)
+#    if (!ALLOW_FAILIURE)
         fprintf(
             stderr,
             "validation failiure: expected %llu different groups, got "
@@ -726,9 +729,10 @@ bool validate(bench_data* bd, int row_count_variant)
             }
         }
         __builtin_trap();
-#endif
+#    endif
         return false;
     }
+#endif
     return true;
 }
 
