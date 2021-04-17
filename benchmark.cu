@@ -20,7 +20,7 @@
 // continue in case of a validation failiure
 #define ALLOW_FAILIURE true
 // disable actual validation and just say "PASS"
-#define VALIDATION_OFF false
+#define VALIDATION_OFF true
 
 #if defined(_OPENMP) && !(DONT_WANT_OPENMP)
 #    include <omp.h>
@@ -33,13 +33,13 @@
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
 #define ENABLE_APPROACH_WARP_CMP true
-#define ENABLE_APPROACH_BLOCK_CMP true
+#define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
-#define ENABLE_BLOCK_CMP_OLD true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
+#define ENABLE_BLOCK_CMP_OLD false
 
 #if ENABLE_APPROACH_HASHTABLE
 #    include "group_by_hashtable.cuh"

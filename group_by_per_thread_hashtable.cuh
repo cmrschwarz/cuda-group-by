@@ -1,9 +1,6 @@
 #pragma once
 #include "group_by_hashtable.cuh"
 
-// 5 bits for 32 threads in one block
-#define PER_THREAD_HT_MAX_GROUP_BITS_BLOCK_DIM_32                              \
-    CUDA_SHARED_MEM_BITS_PER_BLOCK - 5
 #define PER_THREAD_HT_EMPTY_GROUP_VAL ((uint64_t)0)
 #define PER_THREAD_HT_OVERSIZE_BITS 1
 // 16 bytes -> 4 bits
@@ -147,7 +144,7 @@ __global__ void kernel_per_thread_hashtable(
     db_table input, group_ht_entry<false>* hashtable, int stream_count,
     int stream_idx)
 {
-    // the ternaries guards against template instantiations that would
+    // guards against template instantiations that would
     // cause ptxas error during compilations by requiring
     // too much shared memory even if these instantiations are never used
     constexpr bool SANE_INSTANCE =

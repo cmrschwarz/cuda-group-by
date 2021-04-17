@@ -1,9 +1,12 @@
 #pragma once
 #include "group_by_hashtable.cuh"
 
-#define SHARED_MEM_HT_MAX_BITS 11
+#define SHARED_MEM_HT_ENTRY_BITS 4
 #define SHARED_MEM_HT_EMPTY_GROUP_VAL ((uint64_t)0)
 #define SHARED_MEM_HT_OVERSIZE_BITS 1
+#define SHARED_MEM_HT_MAX_GROUP_BITS                                           \
+    (CUDA_SHARED_MEM_BITS_PER_BLOCK - SHARED_MEM_HT_OVERSIZE_BITS -            \
+     SHARED_MEM_HT_ENTRY_BITS)
 
 struct shared_mem_ht_entry {
     uint64_t group;
@@ -25,7 +28,7 @@ static inline bool approach_shared_mem_hashtable_available(
     int stream_count)
 {
     if (!grid_dim || !block_dim) return false;
-    return group_bits <= (SHARED_MEM_HT_MAX_BITS - SHARED_MEM_HT_OVERSIZE_BITS);
+    return group_bits <= SHARED_MEM_HT_MAX_GROUP_BITS;
 }
 
 template <int MAX_GROUP_BITS>
@@ -37,9 +40,9 @@ __global__ void kernel_shared_mem_ht(
     // cause ptxas error during compilations by requiring
     // too much shared memory even if these instantiations are never used
     constexpr size_t SHARED_MEM_HT_CAPACITY =
-        (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS > SHARED_MEM_HT_MAX_BITS)
-            ? 1
-            : (size_t)1 << (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS);
+        (MAX_GROUP_BITS <= SHARED_MEM_HT_MAX_GROUP_BITS)
+            ? (size_t)1 << (MAX_GROUP_BITS + SHARED_MEM_HT_OVERSIZE_BITS)
+            : 1;
     constexpr size_t SHARED_MEM_HT_MASK = SHARED_MEM_HT_CAPACITY - 1;
 
     __shared__ bool empty_group_used;
