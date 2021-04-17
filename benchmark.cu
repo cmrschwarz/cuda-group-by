@@ -20,7 +20,7 @@
 // continue in case of a validation failiure
 #define ALLOW_FAILIURE true
 // disable actual validation and just say "PASS"
-#define VALIDATION_OFF true
+#define VALIDATION_OFF false
 
 #if defined(_OPENMP) && !(DONT_WANT_OPENMP)
 #    include <omp.h>
@@ -29,12 +29,12 @@
 #    define USE_OPENMP false
 #endif
 
-#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_HASHTABLE false
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
-#define ENABLE_APPROACH_WARP_CMP true
+#define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP false
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
@@ -107,7 +107,7 @@ const int benchmark_gpu_block_dim_variants[] = {0, 32, 128, 512};
 const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
                                                512, 1024, 2048, 4096, 8192};
 #else
-const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512, 1024};
+const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
 
 #if BIG_DATA
@@ -870,20 +870,30 @@ void run_approach_block_cmp(
 
 template <int GROUP_BIT_COUNT>
 void run_approach_shared_mem_hashtable(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
+    bench_data* bd, bool optimistic, int row_count_variant, size_t row_count,
+    int grid_dim, int block_dim, int stream_count, int iteration)
 {
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     if (!approach_shared_mem_hashtable_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
         return;
     }
-    group_by_shared_mem_hashtable<GROUP_BIT_COUNT>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, "shared_mem_hashtable");
+    if (optimistic) {
+        group_by_shared_mem_hashtable<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "shared_mem_hashtable_optimistic");
+    }
+    else {
+        group_by_shared_mem_hashtable<GROUP_BIT_COUNT, false>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "shared_mem_hashtable");
+    }
 
 #endif
 }
@@ -973,55 +983,60 @@ int run_approach(
         } break;
         case 2: {
             run_approach_shared_mem_hashtable<GROUP_BIT_COUNT>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
+                bd, false, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 3: {
-            run_approach_per_thread_hashtable<GROUP_BIT_COUNT>(
-                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_shared_mem_hashtable<GROUP_BIT_COUNT>(
+                bd, true, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 4: {
             run_approach_per_thread_hashtable<GROUP_BIT_COUNT>(
-                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+                bd, false, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 5: {
+            run_approach_per_thread_hashtable<GROUP_BIT_COUNT>(
+                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 6: {
             run_approach_warp_cmp<GROUP_BIT_COUNT>(
                 bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 6: {
+        case 7: {
             run_approach_block_cmp<GROUP_BIT_COUNT>(
                 bd, false, false, row_count_variant, row_count, grid_dim,
                 block_dim, stream_count, iteration);
         } break;
-        case 7: {
+        case 8: {
             run_approach_block_cmp<GROUP_BIT_COUNT>(
                 bd, false, true, row_count_variant, row_count, grid_dim,
                 block_dim, stream_count, iteration);
         } break;
-        case 8: {
+        case 9: {
             run_approach_block_cmp<GROUP_BIT_COUNT>(
                 bd, true, false, row_count_variant, row_count, grid_dim,
                 block_dim, stream_count, iteration);
         } break;
-        case 9: {
+        case 10: {
             run_approach_block_cmp<GROUP_BIT_COUNT>(
                 bd, true, true, row_count_variant, row_count, grid_dim,
                 block_dim, stream_count, iteration);
         } break;
-        case 10: {
+        case 11: {
             run_approach_cub_radix_sort<GROUP_BIT_COUNT>(
                 bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 11: {
+        case 12: {
             run_approach_throughput_test<GROUP_BIT_COUNT>(
                 bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 12: return -1;
+        case 13: return -1;
         default: assert(false);
     }
     return approach_id + 1;
@@ -1079,11 +1094,13 @@ int main()
     run_benchmarks_for_group_bit_count<5>(&bench_data);
     run_benchmarks_for_group_bit_count<7>(&bench_data);
     run_benchmarks_for_group_bit_count<9>(&bench_data);
+    run_benchmarks_for_group_bit_count<10>(&bench_data);
+    run_benchmarks_for_group_bit_count<11>(&bench_data);
 
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<12>(&bench_data);
+    run_benchmarks_for_group_bit_count<11>(&bench_data);
     run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
 #endif
