@@ -189,8 +189,9 @@ def contains_col_val_mult(rows, coldict):
     return False
 
 def abort_plot(plot_name):
-    if os.path.isfile(plot_name):
-        os.remove(plot_name)
+    # since we clear the entire output directory beforehand
+    # there's nothing to do here right now
+    pass
 
 # graph generators
 
@@ -817,6 +818,23 @@ def timestamp(msg):
     ) 
 
 
+def jitter_filter(data, max_dev):
+    res = list(data)
+    cls_cols = list(COLUMNS)
+    cls_cols.remove(ITERATION_COL)
+    cls_cols.remove(THROUGHPUT_COL)
+    cls_cols.remove(TIME_MS_COL)
+    filtered = 0
+    classes = classify_mult(res, cls_cols)
+    for c in classes.values():
+        avg = col_average(c, THROUGHPUT_COL)
+        for r in c:
+            if r[THROUGHPUT_COL] > avg * (1 + max_dev):
+                res.remove(r)
+                filtered += 1
+    print(f"filtered {100.0 * filtered/len(data):.2f} % jittered values")
+    return res
+
 def main():
     # initialization
     global process_start_time
@@ -841,7 +859,14 @@ def main():
     else:
         output_path="./graphs"
 
+    # make sure the path exists 
     os.makedirs(output_path, exist_ok=True)
+    
+    # remove all previous pngs from the output dir
+    for f in os.listdir(output_path):
+        if ("pad" + f)[-4:] == ".png":
+            os.remove(output_path + "/" + f)
+            
     
     #read in data
     data_raw = read_csv(input_path)
@@ -852,6 +877,8 @@ def main():
     # filter out the 0'th iteration, trying reduce standard deviation
     # since this doesn't really help, we don't do it 
     # data = exclude_col_val(data, ITERATION_COL, 0)
+    # instead, use this wonky jitter filter
+    data = jitter_filter(data, 0.2)
 
     # average runs since we basically always need this
     data_avg = average_columns(
