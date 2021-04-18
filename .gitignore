@@ -4,3 +4,6 @@
 /a.out
 /bench*.csv
 /graphs
+*.o
+*.hi
+/gen_perfect_hash_primes

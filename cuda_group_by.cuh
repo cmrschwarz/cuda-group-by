@@ -56,3 +56,13 @@ static inline void gpu_data_free(gpu_data* gd)
     free_db_table_gpu(&gd->output);
     free_db_table_gpu(&gd->input);
 }
+
+static inline size_t ceil_to_pow_two(size_t v)
+{
+    return v == 1 ? 1 : 1 << (8 * sizeof(size_t) - __builtin_clzl(v - 1));
+}
+
+static inline int log2(size_t v)
+{
+    return 8 * sizeof(size_t) - __builtin_clzll((v)) - 1;
+}

@@ -18,7 +18,7 @@
 // use small aggregate values to ease debugging
 #define SMALL_AGGREGATE_VALS false
 // continue in case of a validation failiure
-#define ALLOW_FAILIURE true
+#define ALLOW_FAILIURE false
 // disable actual validation and just say "PASS"
 #define VALIDATION_OFF false
 
@@ -30,12 +30,13 @@
 #endif
 
 #define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
 #define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
@@ -55,6 +56,10 @@
 
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
 #    include "group_by_shared_mem_hashtable.cuh"
+#endif
+
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+#    include "group_by_shared_mem_perfect_hashtable.cuh"
 #endif
 
 #if ENABLE_APPROACH_PER_THREAD_HASHTABLE
@@ -245,6 +250,9 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+    group_by_shared_mem_perfect_hashtable_init(BENCHMARK_GROUPS_MAX);
+#endif
 #if ENABLE_APPROACH_PER_THREAD_HASHTABLE
     group_by_per_thread_hashtable_init(BENCHMARK_GROUPS_MAX);
 #endif
@@ -266,6 +274,9 @@ void free_bench_data(bench_data* bd)
 #endif
 #if ENABLE_APPROACH_PER_THREAD_HASHTABLE
     group_by_per_thread_hashtable_fin();
+#endif
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+    group_by_shared_mem_perfect_hashtable_fin();
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
     group_by_shared_mem_hashtable_fin();
@@ -585,11 +596,12 @@ void write_bench_data_omp(
     }
 }
 
-void setup_bench_data(bench_data* bd, size_t group_count)
+void setup_bench_data(bench_data* bd, size_t group_bits)
 {
     // use static seeds for the generators to improve reproducability
     // special care was also taken to make sure that OMP_THREAD_COUNT
     // does not influence the results
+    size_t group_count = (size_t)1 << group_bits;
     constexpr size_t generator_base_seed = 1337;
     constexpr size_t generator_stride = 1 << 15;
 
@@ -611,6 +623,12 @@ void setup_bench_data(bench_data* bd, size_t group_count)
     CUDA_TRY(cudaMemcpy(
         bd->data_gpu.input.aggregate_col, bd->input_cpu.aggregate_col,
         BENCHMARK_ROWS_MAX * sizeof(uint64_t), cudaMemcpyHostToDevice));
+
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+    init_perfect_hash_table(
+        bd->expected_output, benchmark_row_count_variants,
+        BENCHMARK_ROW_COUNT_VARIANT_COUNT, group_bits);
+#endif
 }
 bool validate(bench_data* bd, int row_count_variant)
 {
@@ -897,6 +915,26 @@ void run_approach_shared_mem_hashtable(
 
 #endif
 }
+
+template <int GROUP_BIT_COUNT>
+void run_approach_shared_mem_perfect_hashtable(
+    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
+    int block_dim, int stream_count, int iteration)
+{
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+    if (!approach_shared_mem_perfect_hashtable_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        return;
+    }
+
+    group_by_shared_mem_perfect_hashtable<GROUP_BIT_COUNT>(
+        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+        bd->events, bd->start_event, bd->end_event);
+    record_time_and_validate(
+        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+        stream_count, iteration, "shared_mem_perfect_hashtable");
+#endif
+}
 template <int GROUP_BIT_COUNT>
 void run_approach_per_thread_hashtable(
     bench_data* bd, bool bank_optimized, int row_count_variant,
@@ -1036,7 +1074,12 @@ int run_approach(
                 bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 13: return -1;
+        case 13: {
+            run_approach_shared_mem_perfect_hashtable<GROUP_BIT_COUNT>(
+                bd, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 14: return -1;
         default: assert(false);
     }
     return approach_id + 1;
@@ -1045,7 +1088,7 @@ template <int GROUP_BIT_COUNT>
 void run_benchmarks_for_group_bit_count(bench_data* bd)
 {
     static_assert(GROUP_BIT_COUNT <= BENCHMARK_GROUP_BITS_MAX);
-    setup_bench_data(bd, 1 << GROUP_BIT_COUNT);
+    setup_bench_data(bd, GROUP_BIT_COUNT);
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
         size_t row_count = benchmark_row_count_variants[rcv];
         // artificially reduce the row counts
