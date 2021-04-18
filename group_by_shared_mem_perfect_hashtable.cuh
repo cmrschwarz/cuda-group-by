@@ -68,7 +68,7 @@ static uint64_t pht_l1_hash_const;
 static shared_mem_pht_l2_occurance_map_entry* pht_l2_occurance_map;
 static shared_mem_pht_l2_occurance_map_entry* pht_l2_occurance_map_dev;
 
-static inline void init_perfect_hash_table(
+static inline void build_perfect_hashtable(
     const std::unordered_map<uint64_t, uint64_t>* expected_groups,
     const size_t* row_count_variants, int row_count_variant_count,
     int group_bits)
@@ -181,8 +181,7 @@ static inline void init_perfect_hash_table(
         pht_l1_hash_const = a;
         return;
     }
-    // the chance of this ever happening is <= (1/2) ^ (2 ^ group_bits)
-    // TODO: it might not be possible at all, investigate
+    // we failed to build a perfect hashtable :( [should be very unlikely]
     RELASE_ASSERT(false);
 }
 
@@ -237,13 +236,13 @@ __global__ void kernel_shared_mem_pht(
 
     constexpr size_t L1_BITS = MAX_GROUP_BITS + SHARED_MEM_PHT_L1_OVERSIZE_BITS;
 
-    __shared__ uint64_t l2_vals[L2_CAPACITY];
+    __shared__ uint64_t shared_aggregates[L2_CAPACITY];
     int tid = threadIdx.x + blockIdx.x * blockDim.x +
               stream_idx * blockDim.x * gridDim.x;
     int stride = blockDim.x * gridDim.x * stream_count;
 
     for (int i = threadIdx.x; i < L2_CAPACITY; i += blockDim.x) {
-        l2_vals[i] = 0;
+        shared_aggregates[i] = 0;
     }
     __syncthreads();
 
@@ -255,7 +254,7 @@ __global__ void kernel_shared_mem_pht(
         size_t l2_hash =
             almost_universal_hash(group, l1e->hash_const, l1e->capacity_bits);
         atomicAdd(
-            (cudaUInt64_t*)&l2_vals[l2_hash + l1e->offset],
+            (cudaUInt64_t*)&shared_aggregates[l2_hash + l1e->offset],
             input.aggregate_col[i]);
     }
 
@@ -266,7 +265,7 @@ __global__ void kernel_shared_mem_pht(
         size_t min_rc = pht_l2_occurance_map[i].min_rowcount_occuring;
         if (min_rc != 0 && min_rc <= input.row_count) {
             group_ht_insert<MAX_GROUP_BITS, false>(
-                hashtable, pht_l2_occurance_map[i].group, l2_vals[i]);
+                hashtable, pht_l2_occurance_map[i].group, shared_aggregates[i]);
         }
     }
 }

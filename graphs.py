@@ -51,6 +51,7 @@ approach_colors = {
     "block_cmp_old_naive_writeout": "darkred",
     "shared_mem_hashtable": "purple",
     "shared_mem_hashtable_optimistic": "red",
+    "shared_mem_perfect_hashtable": "mediumpurple",
     "cub_radix_sort": "turquoise",
     "throughput_test": "lightgray",
     "per_thread_hashtable": "teal",
@@ -67,6 +68,7 @@ approach_markers = {
     "block_cmp_old_naive_writeout": "*",
     "shared_mem_hashtable": ">",
     "shared_mem_hashtable_optimistic": "2",
+    "shared_mem_perfect_hashtable": "D",
     "cub_radix_sort": "o",
     "throughput_test": "+",
     "per_thread_hashtable": "3",
@@ -171,6 +173,9 @@ def min_col_val(rows, col):
 
 def filter_col_val(rows, col, val):
     return list(filter(lambda r: r[col] == val, rows))
+
+def exclude_col_val(rows, col, val):
+    return list(filter(lambda r: r[col] != val, rows))
 
 def contains_col_val_mult(rows, coldict):
     for r in rows:
@@ -842,7 +847,11 @@ def main():
     data_raw = read_csv(input_path)
 
     # filter out failed runs
-    data = filter_col_val(data_raw, VALIDATION_COL, "PASS")
+    data = exclude_col_val(data_raw, VALIDATION_COL, "FAIL")
+
+    # filter out the 0'th iteration, trying reduce standard deviation
+    # since this doesn't really help, we don't do it 
+    # data = exclude_col_val(data, ITERATION_COL, 0)
 
     # average runs since we basically always need this
     data_avg = average_columns(

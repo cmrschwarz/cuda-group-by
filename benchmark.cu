@@ -29,13 +29,13 @@
 #    define USE_OPENMP false
 #endif
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
-#define ENABLE_APPROACH_WARP_CMP false
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
 #define ENABLE_APPROACH_BLOCK_CMP false
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
@@ -625,7 +625,7 @@ void setup_bench_data(bench_data* bd, size_t group_bits)
         BENCHMARK_ROWS_MAX * sizeof(uint64_t), cudaMemcpyHostToDevice));
 
 #if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
-    init_perfect_hash_table(
+    build_perfect_hashtable(
         bd->expected_output, benchmark_row_count_variants,
         BENCHMARK_ROW_COUNT_VARIANT_COUNT, group_bits);
 #endif
