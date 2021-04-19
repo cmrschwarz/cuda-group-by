@@ -392,16 +392,19 @@ void write_bench_data_omp(
     RELASE_ASSERT(groups);
 
     size_t stride = group_count / OMP_THREAD_COUNT;
-    if (!stride) stride = group_count;
-    // this works since generator stride is a power of two
-    while (stride % GENERATOR_STRIDE != 0) stride *= 2;
+    if (!stride) stride = 1;
+    if (stride % GENERATOR_STRIDE != 0) {
+        stride += GENERATOR_STRIDE - (stride % GENERATOR_STRIDE);
+    }
 
 #pragma omp parallel for
     for (int t = 0; t < OMP_THREAD_COUNT; t++) {
         size_t start = t * stride;
         if (start < group_count) {
             size_t end = (t + 1) * stride;
-            if (end > group_count) end = group_count;
+            if (end > group_count || t + 1 == OMP_THREAD_COUNT) {
+                end = group_count;
+            }
             for (size_t i = start; i < end; i++) {
                 if (i % GENERATOR_STRIDE == 0) {
                     generators[t] = std::mt19937_64(generator_base_seed + i);
@@ -435,7 +438,6 @@ void write_bench_data_omp(
     size_t t_work = 0;
     const float slack = 0.1;
     while (true) {
-        if (t_work > (1 - slack) * thread_work) t++;
         if (t == OMP_THREAD_COUNT) break;
         size_t work =
             std::get<end_idx>(sections[i]) - std::get<start_idx>(sections[i]);
@@ -443,18 +445,21 @@ void write_bench_data_omp(
             std::get<thrd_idx>(sections[i]) = t;
             t_work += work;
             i++;
+            if (t_work > (1 - slack) * thread_work) t++;
             continue;
         }
 
-        section sec_split = sections[i];
-        std::get<end_idx>(sec_split) = std::get<end_idx>(sections[i]);
-        std::get<start_idx>(sec_split) =
-            std::get<start_idx>(sections[i]) + thread_work - t_work;
-        std::get<end_idx>(sections[i]) = std::get<start_idx>(sec_split);
-        std::get<thrd_idx>(sections[i]) = t;
-        sections.insert(sections.begin() + i + 1, std::move(sec_split));
+        if (thread_work > t_work) {
+            section sec_split = sections[i];
+            std::get<end_idx>(sec_split) = std::get<end_idx>(sections[i]);
+            std::get<start_idx>(sec_split) =
+                std::get<start_idx>(sections[i]) + (thread_work - t_work);
+            std::get<end_idx>(sections[i]) = std::get<start_idx>(sec_split);
+            std::get<thrd_idx>(sections[i]) = t;
+            i++;
+            sections.insert(sections.begin() + i, std::move(sec_split));
+        }
         t++;
-        i++;
         t_work = 0;
     }
     while (i < sections.size()) {
@@ -474,7 +479,7 @@ void write_bench_data_omp(
         }
         if (sid != -1) {
             size_t start = std::get<start_idx>(sections[sid]);
-            size_t gen_base = start / GENERATOR_STRIDE * GENERATOR_STRIDE;
+            size_t gen_base = (start / GENERATOR_STRIDE) * GENERATOR_STRIDE;
             if (gen_base != start) {
                 generators[t] = std::mt19937_64(generator_base_seed + gen_base);
                 // discard twice since we use the generator for group and value
@@ -640,7 +645,7 @@ bool validate(bench_data* bd, int row_count_variant)
     bool fault_occured = false;
     if (row_count > (1 << 13)) {
         size_t stride = row_count / OMP_THREAD_COUNT;
-        if (!stride) stride = row_count;
+        if (!stride) stride = 1;
 #    pragma omp parallel for
         for (int t = 0; t < OMP_THREAD_COUNT; t++) {
             size_t start = t * stride;
