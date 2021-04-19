@@ -646,7 +646,10 @@ bool validate(bench_data* bd, int row_count_variant)
             size_t start = t * stride;
             if (start < row_count) {
                 size_t end = (t + 1) * stride;
-                if (end > row_count) end = row_count;
+                if (end > row_count || t + 1 == OMP_THREAD_COUNT) {
+                    end = row_count;
+                }
+                if (start < end) {
                 size_t byte_count = (end - start) * sizeof(uint64_t);
                 cudaMemcpy(
                     bd->output_cpu.group_col + start,
@@ -672,6 +675,7 @@ bool validate(bench_data* bd, int row_count_variant)
                 }
             }
         }
+    }
     }
     else {
         cudaMemcpy(
