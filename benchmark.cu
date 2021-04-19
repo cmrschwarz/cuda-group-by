@@ -650,32 +650,32 @@ bool validate(bench_data* bd, int row_count_variant)
                     end = row_count;
                 }
                 if (start < end) {
-                size_t byte_count = (end - start) * sizeof(uint64_t);
-                cudaMemcpy(
-                    bd->output_cpu.group_col + start,
-                    bd->data_gpu.output.group_col + start, byte_count,
-                    cudaMemcpyDeviceToHost);
-                cudaMemcpy(
-                    bd->output_cpu.aggregate_col + start,
-                    bd->data_gpu.output.aggregate_col + start, byte_count,
-                    cudaMemcpyDeviceToHost);
+                    size_t byte_count = (end - start) * sizeof(uint64_t);
+                    cudaMemcpy(
+                        bd->output_cpu.group_col + start,
+                        bd->data_gpu.output.group_col + start, byte_count,
+                        cudaMemcpyDeviceToHost);
+                    cudaMemcpy(
+                        bd->output_cpu.aggregate_col + start,
+                        bd->data_gpu.output.aggregate_col + start, byte_count,
+                        cudaMemcpyDeviceToHost);
 
-                for (size_t i = start; i < end; i++) {
-                    uint64_t group = bd->output_cpu.group_col[i];
-                    auto expected =
-                        bd->expected_output[row_count_variant].find(group);
-                    uint64_t got = bd->output_cpu.aggregate_col[i];
-                    if (expected ==
-                            bd->expected_output[row_count_variant].end() ||
-                        expected->second != got) {
-                        faults[t] = i + 1;
-                        i = end;
-                        fault_occured = true;
+                    for (size_t i = start; i < end; i++) {
+                        uint64_t group = bd->output_cpu.group_col[i];
+                        auto expected =
+                            bd->expected_output[row_count_variant].find(group);
+                        uint64_t got = bd->output_cpu.aggregate_col[i];
+                        if (expected ==
+                                bd->expected_output[row_count_variant].end() ||
+                            expected->second != got) {
+                            faults[t] = i + 1;
+                            i = end;
+                            fault_occured = true;
+                        }
                     }
                 }
             }
         }
-    }
     }
     else {
         cudaMemcpy(
@@ -710,9 +710,8 @@ bool validate(bench_data* bd, int row_count_variant)
             if (expected == bd->expected_output[row_count_variant].end()) {
                 fprintf(
                     stderr,
-                    "validation failiure: found unexpected group %llu in "
-                    "output "
-                    "index %llu\n",
+                    "validation failiure: found unexpected group %" PRIu64 "in "
+                    "output index %" PRIu64 "\n",
                     group, i);
                 __builtin_trap();
                 return false;
@@ -720,8 +719,8 @@ bool validate(bench_data* bd, int row_count_variant)
             else if (expected->second != got) {
                 fprintf(
                     stderr,
-                    "validation failiure for group %llu: expected %llu, got "
-                    "%llu\n",
+                    "validation failiure for group %" PRIu64
+                    ": expected %" PRIu64 ", got %" PRIu64 "\n",
                     group, expected->second, got);
                 __builtin_trap();
                 return false;
@@ -735,8 +734,8 @@ bool validate(bench_data* bd, int row_count_variant)
 #    if (!ALLOW_FAILIURE)
         fprintf(
             stderr,
-            "validation failiure: expected %llu different groups, got "
-            "%llu\n",
+            "validation failiure: expected %" PRIu64
+            " different groups, got %" PRIu64 "\n",
             expected_output_row_count, bd->output_cpu.row_count);
         if (bd->output_cpu.row_count < expected_output_row_count) {
             std::unordered_set<uint64_t> occured_groups;
@@ -746,7 +745,9 @@ bool validate(bench_data* bd, int row_count_variant)
             for (auto it = bd->expected_output[row_count_variant].begin();
                  it != bd->expected_output[row_count_variant].end(); ++it) {
                 if (occured_groups.find(it->first) == occured_groups.end()) {
-                    fprintf(stderr, "missing expected group %llu\n", it->first);
+                    fprintf(
+                        stderr, "missing expected group %" PRIu64 "\n",
+                        it->first);
                 }
             }
         }

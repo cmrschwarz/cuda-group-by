@@ -101,13 +101,11 @@ __device__ void group_ht_insert(
                     // atomicInc doesn't exist for 64 bit...
                     if (EAGER_OUT_IDX) {
                         hte->eager_inc_out_idx();
-                        /*
                         // DEBUG
-                        printf(
-                            "assigning index %llu to group %llu in ht slot "
-                            "%llu\n",
-                            hte->output_idx, hte->group, hte - hashtable);
-                        */
+                        /*printf(
+                            "assigning index %" PRIu64 " to group %" PRIu64
+                            " in ht slot %" PRIu64 "\n",
+                            hte->output_idx, hte->group, hte - hashtable);*/
                     }
                     break;
                 }
@@ -177,12 +175,11 @@ __global__ void kernel_write_out_group_ht(
             size_t out_idx = hte->aquire_out_idx();
             output.group_col[out_idx] = hte->group;
             output.aggregate_col[out_idx] = hte->aggregate;
-            /*
+
             // DEBUG
-            printf(
-                "writing out group %llu in index %llu\n", hte->group,
-                hte->output_idx);
-            */
+            /*printf(
+                "writing out group %" PRIu64 " in index %" PRIu64 "\n",
+                hte->group, hte->output_idx);*/
 
             // reset for the next run
             hte->group = GROUP_HT_EMPTY_VALUE;

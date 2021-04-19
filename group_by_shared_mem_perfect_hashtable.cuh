@@ -246,6 +246,7 @@ __global__ void kernel_shared_mem_pht(
     constexpr size_t L1_BITS = MAX_GROUP_BITS + SHARED_MEM_PHT_L1_OVERSIZE_BITS;
 
     __shared__ uint64_t shared_aggregates[L2_CAPACITY];
+
     int tid = threadIdx.x + blockIdx.x * blockDim.x +
               stream_idx * blockDim.x * gridDim.x;
     int stride = blockDim.x * gridDim.x * stream_count;
