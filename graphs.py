@@ -456,6 +456,111 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
     fig.tight_layout(h_pad=2)
     fig.savefig(plot_name, bbox_inches="tight")
 
+def elements_per_thread_over_group_count_heatmap(data, approach, best_in_class):
+    eps_digits = 3
+    plot_name = (
+        f"{approach}_elems_per_thread_over_group_count_" 
+        + ("best_in_class" if best_in_class else "average") 
+        + "_throughput_heatmap_over_rowcount_and_stream_count.png"
+    )
+    filtered = filter_col_val(data, APPROACH_COL, approach)
+
+    if len(filtered) == 0:
+        abort_plot(plot_name)
+        return
+
+    # reversed so the highest value is at the top, not the bottom
+    by_row_counts = classify(filtered, ROW_COUNT_COL)
+    rowcount_vals = sorted(by_row_counts.keys(), reverse=True)
+    groupcount_vals = sorted(unique_col_vals(filtered, GROUP_COUNT_COL))
+
+    stream_count_vals = sorted(unique_col_vals(filtered, STREAM_COUNT_COL))
+    
+    
+    elems_per_threads_values = {}
+    for rc, rows in by_row_counts.items():
+        vals = []
+        for r in rows:
+            sc = r[STREAM_COUNT_COL]
+            if sc == 0: sc = 1
+            vals.append(round(float(rc) / (r[GRID_DIM_COL] * r[BLOCK_DIM_COL] * sc), eps_digits))
+        epts = dict.fromkeys(vals)
+        # reverse the y axis so the small values are at the bottom
+        elems_per_threads_values[rc] = sorted(epts, reverse=True)
+
+    fig, axes = plt.subplots(
+        nrows=len(rowcount_vals), ncols=len(stream_count_vals),
+        dpi=200, 
+        figsize=(
+            (len(stream_count_vals) + 1) * len(groupcount_vals),
+            sum([len(epsvs) for epsvs in elems_per_threads_values.values()])
+        ),
+    )
+    for (row_id, rc) in enumerate(rowcount_vals):
+        by_row_count = by_row_counts[rc]
+        rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
+        rc_max_val = max_col_val(by_row_count, THROUGHPUT_COL)
+        rc_val_range = rc_max_val - rc_min_val
+        for (col_id, sc) in enumerate(stream_count_vals):
+            act_sc = 1 if sc == 0 else sc
+            ax = axes[row_id][col_id]
+            vals = filter_col_val(by_row_count, STREAM_COUNT_COL, sc)
+            eps_vals = elems_per_threads_values[rc]
+          
+            gc_indices = {v:k for (k,v) in enumerate(groupcount_vals)}
+            eps_indices = {v:k for (k,v) in enumerate(eps_vals)}
+
+            ax.set_xlabel("group count")
+            ax.set_ylabel("elements per thread")
+            ax.set_title(f"rc = {rc}, sc = {sc}")
+        
+            grid = [[0] * len(gc_indices) for i in range(len(eps_indices))]
+            counts = [[0] * len(gc_indices) for i in range(len(eps_indices))]
+            for (gc, rows) in classify(vals, GROUP_COUNT_COL).items():
+                for r in rows:
+                    eps = round(float(rc) / (r[GRID_DIM_COL] * r[BLOCK_DIM_COL] * act_sc), eps_digits)
+                    epsi = eps_indices[eps]
+                    gci = gc_indices[gc]
+                    tp = r[THROUGHPUT_COL]
+                    if best_in_class:
+                        if (tp > grid[epsi][gci]):
+                            grid[epsi][gci] = tp
+                        counts[epsi][gci] = 1
+                    else:
+                        grid[epsi][gci] += tp
+                        counts[epsi][gci] += 1
+            for x in range(len(groupcount_vals)):
+                for y in range(len(eps_indices)):
+                    val = grid[y][x]
+                    count = counts[y][x]
+                    if (count == 0):
+                        val_str = "N/A"
+                    else:
+                        val = val / count
+                        if val < 1000 and val != 0: 
+                            val_str = str(round(val, int(3-max(math.log10(val), 0))))
+                        else:
+                            val_str = str(round(val))
+                        if "." in val_str:
+                            val_str = (val_str + "0" * 5)[0:5]
+                        else:
+                            val_str = (val_str + "." + "0" * 4)[0:5]
+                    ax.text(
+                        x, y, val_str, ha="center", va="center", 
+                        color="black" if (val - rc_min_val) / rc_val_range < 0.8 else "white" 
+                    )
+            im = ax.imshow(np.array(grid), cmap='Reds', vmin=rc_min_val, vmax=rc_max_val)
+            ax.set_xticks(range(len(groupcount_vals)))
+            ax.set_yticks(range(len(eps_vals)))
+
+            ax.set_xticklabels(groupcount_vals)
+            ax.set_yticklabels(eps_vals)
+            if col_id + 1 == len(stream_count_vals):
+                cax = make_axes_locatable(ax).append_axes("right", size="10%", pad=0.5)
+                fig.colorbar(im, cax=cax)
+    fig.tight_layout(h_pad=2)
+    fig.savefig(plot_name, bbox_inches="tight")
+
 def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_str, col_unit=None):
     plot_name = (
         ("relative_" if relative else "") 
@@ -829,7 +934,7 @@ def jitter_filter(data, max_dev):
     for c in classes.values():
         avg = col_average(c, THROUGHPUT_COL)
         for r in c:
-            if r[THROUGHPUT_COL] > avg * (1 + max_dev):
+            if math.fabs(r[THROUGHPUT_COL] - avg) > avg * max_dev:
                 res.remove(r)
                 filtered += 1
     print(f"filtered {100.0 * filtered/len(data):.2f} % jittered values")
@@ -861,7 +966,7 @@ def main():
 
     # make sure the path exists 
     os.makedirs(output_path, exist_ok=True)
-    
+
     # remove all previous pngs from the output dir
     for f in os.listdir(output_path):
         if ("pad" + f)[-4:] == ".png":
@@ -878,7 +983,7 @@ def main():
     # since this doesn't really help, we don't do it 
     # data = exclude_col_val(data, ITERATION_COL, 0)
     # instead, use this wonky jitter filter
-    data = jitter_filter(data, 0.2)
+    # data = jitter_filter(data, 0.2)
 
     # average runs since we basically always need this
     data_avg = average_columns(
@@ -904,6 +1009,8 @@ def main():
     ]
     slow_jobs = [
         lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", group_count=32),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "shared_mem_hashtable", False),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "shared_mem_hashtable", True)
     ]
     if(gen_all):
         #generate a failiure heatmap for all approaches containing failiures
