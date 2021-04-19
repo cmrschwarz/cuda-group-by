@@ -24,11 +24,12 @@ set(CMAKE_CXX_STANDARD 14)
         message(FATAL_ERROR "failed to get cc by running get_cc: ${PROC_RES}")
     endif()
 
-    message(STATUS "Cuda Compute Capability: ${CUDA_COMP_CAP}")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --generate-code arch=compute_${CUDA_COMP_CAP},code=sm_${CUDA_COMP_CAP}")
+    # message(STATUS "Cuda Compute Capability: ${CUDA_COMP_CAP}")
+    # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --generate-code arch=compute_${CUDA_COMP_CAP},code=sm_${CUDA_COMP_CAP}")
 
 # add our benchmark binary and its dependencies
     add_executable(cuda-group-by benchmark.cu)
+    set_property(TARGET cuda-group-by PROPERTY CUDA_ARCHITECTURES ${CUDA_COMP_CAP}) 
     option(
         CUDA_GROUP_BY_USE_CUB_SUBMODULE 
         "use the cub sumodulle located in ./deps/cub instead of the system version" 
