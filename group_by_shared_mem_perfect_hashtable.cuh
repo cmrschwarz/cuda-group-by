@@ -189,6 +189,11 @@ static inline void group_by_shared_mem_perfect_hashtable_init(size_t max_groups)
 {
     group_by_hashtable_init(max_groups);
     max_groups = ceil_to_pow_two(max_groups);
+    int group_bits = log2(max_groups);
+    if (group_bits > SHARED_MEM_PHT_MAX_GROUP_BITS) {
+        group_bits = SHARED_MEM_PHT_MAX_GROUP_BITS;
+        max_groups = (size_t)1 << SHARED_MEM_PHT_MAX_GROUP_BITS;
+    }
     size_t l1_table_size = (max_groups << SHARED_MEM_PHT_L1_OVERSIZE_BITS) *
                            sizeof(shared_mem_pht_l1_entry);
 
@@ -207,6 +212,10 @@ static inline void group_by_shared_mem_perfect_hashtable_init(size_t max_groups)
 
 static inline void group_by_shared_mem_perfect_hashtable_fin()
 {
+    CUDA_TRY(cudaFree(pht_l2_occurance_map_dev));
+    free(pht_l2_occurance_map);
+    CUDA_TRY(cudaFree(pht_l1_dev));
+    free(pht_l1);
     group_by_hashtable_fin();
 }
 
