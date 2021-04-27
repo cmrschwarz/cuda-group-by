@@ -67,12 +67,17 @@ static uint64_t pht_l1_hash_const;
 
 static shared_mem_pht_l2_occurance_map_entry* pht_l2_occurance_map;
 static shared_mem_pht_l2_occurance_map_entry* pht_l2_occurance_map_dev;
-
+// since this is only applicable for small group counts,
+// no time was spent on optimizing this
 static inline void build_perfect_hashtable(
     const std::unordered_map<uint64_t, uint64_t>* expected_groups,
     const size_t* row_count_variants, int row_count_variant_count,
     int group_bits)
 {
+    std::uniform_int_distribution<uint64_t> dist{
+        std::numeric_limits<uint64_t>::min(),
+        std::numeric_limits<uint64_t>::max()};
+    std::mt19937_64 rng{12};
     if (group_bits > SHARED_MEM_PHT_MAX_GROUP_BITS) return;
     int l1_table_bits = group_bits + SHARED_MEM_PHT_L1_OVERSIZE_BITS;
     size_t l1_table_capacity = ((size_t)1 << l1_table_bits);
@@ -82,45 +87,18 @@ static inline void build_perfect_hashtable(
     size_t l2_occurance_map_size =
         l2_combined_table_capacity *
         sizeof(shared_mem_pht_l2_occurance_map_entry);
-    for (uint64_t a = 1; a <= l1_table_capacity; a += 2) {
+    for (uint64_t l1_attemps = l1_table_capacity * l1_table_capacity;
+         l1_attemps > 0; l1_attemps--) {
+        uint64_t a = dist(rng);
+        a += (1 - a % 2); // odd number wanted
         memset(pht_l1, 0, l1_table_size);
         for (auto kv : expected_groups[row_count_variant_count - 1]) {
             size_t hash = almost_universal_hash(kv.first, a, l1_table_bits);
-            pht_l1[hash].element_count += 1;
+            pht_l1[hash].element_count++;
         }
-        // use 64 bits for this to avoid any overflows
-        uint64_t combined_capacity = 0;
-        for (size_t i = 0; i < l1_table_capacity; i++) {
-            shared_mem_pht_l1_entry* l1e = &pht_l1[i];
-            size_t c = l1e->element_count;
-            l1e->element_count = 0; // reset this for the next phase
-            // if this overflows the run will be discarded anyways since
-            // l2_combined_table_capacity will be exceeded
-            l1e->offset = (uint32_t)combined_capacity;
-
-            // avoid the l2 size overflowing 32 bits
-            if (c >= (uint32_t)1
-                         << (32 / 2 - SHARED_MEM_PHT_L2_OVERSIZE_BITS)) {
-                combined_capacity = l2_combined_table_capacity + 1;
-                break;
-            }
-            // each l2 table's capacity will be the square of its element count
-            // to give us a 50% chance of not having collisions
-            if (c != 0) {
-                if (c == 1) {
-                    c = 2;
-                }
-                else {
-                    c = ceil_to_pow_two(c) << SHARED_MEM_PHT_L2_OVERSIZE_BITS;
-                    c = c * c;
-                }
-                combined_capacity += c;
-                l1e->capacity_bits = log2(c);
-            }
-        }
-        if (combined_capacity > l2_combined_table_capacity) {
-            // chance of this happening is less than 50%
-            continue;
+        for (size_t i = 0; i < l1_table_capacity - 1; i++) {
+            pht_l1[i + 1].offset = pht_l1[i].offset + pht_l1[i].element_count;
+            pht_l1[i].element_count = 0; // reset for next stage
         }
         for (auto kv : expected_groups[row_count_variant_count - 1]) {
             size_t hash = almost_universal_hash(kv.first, a, l1_table_bits);
@@ -129,33 +107,57 @@ static inline void build_perfect_hashtable(
                 kv.first;
             l1e->element_count++;
         }
+        uint64_t combined_capacity = 0;
+
         bool fail = false;
         for (size_t i = 0; i < l1_table_capacity; i++) {
             shared_mem_pht_l1_entry* l1e = &pht_l1[i];
-            if (l1e->capacity_bits == 0) continue;
-            size_t capacity = (size_t)1 << l1e->capacity_bits;
+            uint64_t group_vals_offset = l1e->offset;
+            l1e->offset = combined_capacity;
+            if (l1e->element_count == 0) continue;
+            if (l1e->element_count == 1) {
+                l1e->hash_const = 0; // will always produce hash 0
+                l1e->capacity_bits = 1; // doesn't really matter
+                combined_capacity += 1;
+                continue;
+            }
+            int cap_bits_min = log2(ceil_to_pow_two(l1e->element_count));
             bool success = false;
-            uint64_t max_attemps = capacity * capacity;
-            if (max_attemps < 1 << 20) max_attemps = 1 << 20;
-            for (uint64_t l2a = 1; l2a < max_attemps; l2a += 2) {
-                for (size_t i = 0; i < capacity; i++) {
-                    pht_l2_occurance_map[l1e->offset + i].occuring = false;
+            // some extra leeway with the capacity
+            for (int c = cap_bits_min; c <= 3 * cap_bits_min; c++) {
+                size_t capacity = (size_t)1 << c;
+                if (combined_capacity + capacity > l2_combined_table_capacity) {
+                    break;
                 }
-                bool collision = false;
-                for (size_t i = 0; i < l1e->element_count; i++) {
-                    size_t hash = almost_universal_hash(
-                        pht_l2_occurance_map[l1e->offset + i].group, l2a,
-                        l1e->capacity_bits);
-                    if (pht_l2_occurance_map[l1e->offset + hash].occuring) {
-                        collision = true;
-                        break;
+                for (uint64_t l2_attemps = capacity * capacity; l2_attemps > 0;
+                     l2_attemps--) {
+                    uint64_t l2a = dist(rng);
+                    l2a += (1 - l2a % 2); // odd number wanted
+                    for (size_t i = 0; i < capacity; i++) {
+                        pht_l2_occurance_map[l1e->offset + i].occuring = false;
                     }
-                    pht_l2_occurance_map[l1e->offset + hash].occuring = true;
+                    bool collision = false;
+                    for (size_t i = 0; i < l1e->element_count; i++) {
+                        size_t hash = almost_universal_hash(
+                            pht_l2_occurance_map[group_vals_offset + i].group,
+                            l2a, c);
+                        if (pht_l2_occurance_map[l1e->offset + hash].occuring) {
+                            collision = true;
+                            break;
+                        }
+                        pht_l2_occurance_map[l1e->offset + hash].occuring =
+                            true;
+                    }
+                    if (collision) continue;
+                    success = true;
+                    l1e->hash_const = l2a;
+                    break;
                 }
-                if (collision) continue;
-                success = true;
-                l1e->hash_const = l2a;
-                break;
+                if (success) {
+                    l1e->capacity_bits = c;
+                    combined_capacity += capacity;
+                    break;
+                }
             }
             if (!success) {
                 fail = true;
