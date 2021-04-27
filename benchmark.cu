@@ -14,7 +14,9 @@
 // set to false to reduce data size for debugging
 #define BIG_DATA false
 // use small group values to ease debugging
-#define SMALL_GROUP_VALS false
+#define SMALL_GROUP_VALS true
+// enforce this assumption so we can use the insert_by family of approaches
+#define GROUP_COUNT_EQUALS_GROUP_MAX_VAL true
 // use small aggregate values to ease debugging
 #define SMALL_AGGREGATE_VALS false
 // continue in case of a validation failiure
@@ -171,6 +173,10 @@ struct bench_data {
     cudaEvent_t start_event;
     cudaEvent_t end_event;
 
+    std::uniform_int_distribution<uint64_t> group_vals_dist;
+    std::uniform_int_distribution<uint64_t> group_idx_dist;
+    std::uniform_int_distribution<uint64_t> aggregates_dist;
+
     gpu_data data_gpu;
 
     bench_data()
@@ -318,12 +324,6 @@ void write_bench_data(
     bench_data* bd, size_t group_count, size_t generator_base_seed)
 {
     std::mt19937_64 generator{};
-    std::uniform_int_distribution<uint64_t> group_vals_dist{
-        BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
-
-    std::uniform_int_distribution<uint64_t> agg_vals_dist{
-        BENCHMARK_AGGREGATE_VALS_MIN, BENCHMARK_AGGREGATE_VALS_MAX};
-    std::uniform_int_distribution<uint64_t> group_idx_dist{0, group_count - 1};
 
     std::vector<uint64_t> groups{};
     groups.reserve(group_count);
@@ -334,7 +334,7 @@ void write_bench_data(
         if (i % GENERATOR_STRIDE == 0) {
             generator = std::mt19937_64(generator_base_seed + i);
         }
-        groups.push_back(group_vals_dist(generator));
+        groups.push_back(bd->group_vals_dist(generator));
     }
 
     // initialize input table with random group and aggregate values
@@ -347,8 +347,8 @@ void write_bench_data(
             if (i % GENERATOR_STRIDE == 0) {
                 generator = std::mt19937_64(generator_base_seed + i);
             }
-            uint64_t group = groups[group_idx_dist(generator)];
-            uint64_t val = agg_vals_dist(generator);
+            uint64_t group = groups[bd->group_idx_dist(generator)];
+            uint64_t val = bd->aggregates_dist(generator);
             bd->input_cpu.group_col[i] = group;
             bd->input_cpu.aggregate_col[i] = val;
             auto idx = bd->expected_output[rcv].find(group);
@@ -372,12 +372,6 @@ template <size_t GENERATOR_STRIDE>
 void write_bench_data_omp(
     bench_data* bd, size_t group_count, size_t generator_base_seed)
 {
-    std::uniform_int_distribution<uint64_t> group_vals_dist{
-        BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
-
-    std::uniform_int_distribution<uint64_t> agg_vals_dist{
-        BENCHMARK_AGGREGATE_VALS_MIN, BENCHMARK_AGGREGATE_VALS_MAX};
-    std::uniform_int_distribution<uint64_t> group_idx_dist{0, group_count - 1};
     size_t max_row_count =
         benchmark_row_count_variants[BENCHMARK_ROW_COUNT_VARIANT_COUNT - 1];
 
@@ -409,7 +403,7 @@ void write_bench_data_omp(
                 if (i % GENERATOR_STRIDE == 0) {
                     generators[t] = std::mt19937_64(generator_base_seed + i);
                 }
-                groups[i] = group_vals_dist(generators[t]);
+                groups[i] = bd->group_vals_dist(generators[t]);
             }
         }
     }
@@ -495,9 +489,9 @@ void write_bench_data_omp(
                             std::mt19937_64(generator_base_seed + i);
                     }
                     bd->input_cpu.group_col[i] =
-                        groups[group_idx_dist(generators[t])];
+                        groups[bd->group_idx_dist(generators[t])];
                     bd->input_cpu.aggregate_col[i] =
-                        agg_vals_dist(generators[t]);
+                        bd->aggregates_dist(generators[t]);
                 }
                 sid++;
             }
@@ -609,6 +603,19 @@ void setup_bench_data(bench_data* bd, size_t group_bits)
     size_t group_count = (size_t)1 << group_bits;
     constexpr size_t generator_base_seed = 1337;
     constexpr size_t generator_stride = 1 << 15;
+
+#if GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+    bd->group_vals_dist =
+        std::uniform_int_distribution<uint64_t>{0, group_count};
+#else
+    bd->group_vals_dist = std::uniform_int_distribution<uint64_t>{
+        BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
+#endif
+
+    bd->aggregates_dist = std::uniform_int_distribution<uint64_t>{
+        BENCHMARK_AGGREGATE_VALS_MIN, BENCHMARK_AGGREGATE_VALS_MAX};
+    bd->group_idx_dist =
+        std::uniform_int_distribution<uint64_t>{0, group_count - 1};
 
     // completely separate the cases to make it more readable
 #if !USE_OPENMP

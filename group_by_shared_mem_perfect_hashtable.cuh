@@ -100,14 +100,20 @@ static inline void build_perfect_hashtable(
 
             // avoid the l2 size overflowing 32 bits
             if (c >= (uint32_t)1
-                         << ((32 - SHARED_MEM_PHT_L2_OVERSIZE_BITS) / 2)) {
+                         << (32 / 2 - SHARED_MEM_PHT_L2_OVERSIZE_BITS)) {
                 combined_capacity = l2_combined_table_capacity + 1;
                 break;
             }
             // each l2 table's capacity will be the square of its element count
             // to give us a 50% chance of not having collisions
             if (c != 0) {
-                c = ceil_to_pow_two(c * c) << SHARED_MEM_PHT_L2_OVERSIZE_BITS;
+                if (c == 1) {
+                    c = 2;
+                }
+                else {
+                    c = ceil_to_pow_two(c) << SHARED_MEM_PHT_L2_OVERSIZE_BITS;
+                    c = c * c;
+                }
                 combined_capacity += c;
                 l1e->capacity_bits = log2(c);
             }
