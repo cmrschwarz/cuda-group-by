@@ -97,7 +97,7 @@ const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
 
-#    define BENCHMARK_ROWS_BITS_MAX 25
+#    define BENCHMARK_ROWS_BITS_MAX 21
 #    define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
@@ -173,8 +173,10 @@ struct bench_data {
     cudaEvent_t start_event;
     cudaEvent_t end_event;
 
-    std::uniform_int_distribution<uint64_t> group_vals_dist;
     std::uniform_int_distribution<uint64_t> group_idx_dist;
+#if !GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+    std::uniform_int_distribution<uint64_t> group_vals_dist;
+#endif
     std::uniform_int_distribution<uint64_t> aggregates_dist;
 
     gpu_data data_gpu;
@@ -325,17 +327,18 @@ void write_bench_data(
 {
     std::mt19937_64 generator{};
 
-    std::vector<uint64_t> groups{};
-    groups.reserve(group_count);
-
     // generate group_count different group values
     // (duplicates just mean less groups, no big deal)
+#if !GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+    std::vector<uint64_t> groups{};
+    groups.reserve(group_count);
     for (uint64_t i = 0; i < group_count; i++) {
         if (i % GENERATOR_STRIDE == 0) {
             generator = std::mt19937_64(generator_base_seed + i);
         }
         groups.push_back(bd->group_vals_dist(generator));
     }
+#endif
 
     // initialize input table with random group and aggregate values
     // and increase the ag
@@ -347,7 +350,12 @@ void write_bench_data(
             if (i % GENERATOR_STRIDE == 0) {
                 generator = std::mt19937_64(generator_base_seed + i);
             }
-            uint64_t group = groups[bd->group_idx_dist(generator)];
+            uint64_t group;
+#if GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+            group = bd->group_idx_dist(generator);
+#else
+            group = groups[bd->group_idx_dist(generator)];
+#endif
             uint64_t val = bd->aggregates_dist(generator);
             bd->input_cpu.group_col[i] = group;
             bd->input_cpu.aggregate_col[i] = val;
@@ -390,8 +398,8 @@ void write_bench_data_omp(
     if (stride % GENERATOR_STRIDE != 0) {
         stride += GENERATOR_STRIDE - (stride % GENERATOR_STRIDE);
     }
-
-#pragma omp parallel for
+#if !GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+#    pragma omp parallel for
     for (int t = 0; t < OMP_THREAD_COUNT; t++) {
         size_t start = t * stride;
         if (start < group_count) {
@@ -407,7 +415,7 @@ void write_bench_data_omp(
             }
         }
     }
-
+#endif
     typedef std::tuple<
         std::unordered_map<uint64_t, uint64_t>, size_t, size_t, int, int>
         section;
@@ -488,8 +496,14 @@ void write_bench_data_omp(
                         generators[t] =
                             std::mt19937_64(generator_base_seed + i);
                     }
-                    bd->input_cpu.group_col[i] =
-                        groups[bd->group_idx_dist(generators[t])];
+                    uint64_t group_val;
+#if GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+                    group_val = bd->group_idx_dist(generators[t]);
+#else
+                    group_val = groups[bd->group_idx_dist(generators[t])];
+#endif
+                    bd->input_cpu.group_col[i] = group_val;
+
                     bd->input_cpu.aggregate_col[i] =
                         bd->aggregates_dist(generators[t]);
                 }
@@ -604,10 +618,7 @@ void setup_bench_data(bench_data* bd, size_t group_bits)
     constexpr size_t generator_base_seed = 1337;
     constexpr size_t generator_stride = 1 << 15;
 
-#if GROUP_COUNT_EQUALS_GROUP_MAX_VAL
-    bd->group_vals_dist =
-        std::uniform_int_distribution<uint64_t>{0, group_count};
-#else
+#if !GROUP_COUNT_EQUALS_GROUP_MAX_VAL
     bd->group_vals_dist = std::uniform_int_distribution<uint64_t>{
         BENCHMARK_GROUP_VALS_MIN, BENCHMARK_GROUP_VALS_MAX};
 #endif
