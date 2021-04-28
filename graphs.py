@@ -56,6 +56,8 @@ approach_colors = {
     "throughput_test": "lightgray",
     "per_thread_hashtable": "teal",
     "per_thread_hashtable_bank_optimized": "lime",
+    "global_array": "cyan",
+    "global_array_optimistic": "sienna",
 }
 approach_markers = {
     "hashtable": "^",
@@ -73,6 +75,8 @@ approach_markers = {
     "throughput_test": "+",
     "per_thread_hashtable": "3",
     "per_thread_hashtable_bank_optimized": "4",
+    "global_array": "D",
+    "global_array_optimistic": "d",
 }
 
 

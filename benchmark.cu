@@ -40,6 +40,8 @@
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
 
+#define ENABLE_APPROACH_GLOBAL_ARRAY true
+
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
 #define ENABLE_BLOCK_CMP_OLD false
@@ -74,6 +76,10 @@
 
 #if ENABLE_APPROACH_THROUGHPUT_TEST
 #    include "throughput_test.cuh"
+#endif
+
+#if ENABLE_APPROACH_GLOBAL_ARRAY
+#    include "group_by_global_array.cuh"
 #endif
 
 #if BIG_DATA
@@ -270,10 +276,16 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_THROUGHPUT_TEST
     throughput_test_init();
 #endif
+#if ENABLE_APPROACH_GLOBAL_ARRAY
+    group_by_global_array_init(BENCHMARK_GROUPS_MAX);
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
+#if ENABLE_APPROACH_GLOBAL_ARRAY
+    group_by_global_array_fin();
+#endif
 #if ENABLE_APPROACH_THROUGHPUT_TEST
     throughput_test_fin();
 #endif
@@ -1032,6 +1044,33 @@ void run_approach_throughput_test(
 }
 
 template <int GROUP_BIT_COUNT>
+void run_approach_global_array(
+    bench_data* bd, bool optimistic, int row_count_variant, size_t row_count,
+    int grid_dim, int block_dim, int stream_count, int iteration)
+{
+#if ENABLE_APPROACH_GLOBAL_ARRAY
+    if (!approach_global_array_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        return;
+    }
+    if (optimistic) {
+        group_by_global_array<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+    }
+    else {
+        group_by_global_array<GROUP_BIT_COUNT, false>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+    }
+    record_time_and_validate(
+        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+        stream_count, iteration,
+        optimistic ? "global_array_optimistic" : "global_array");
+#endif
+}
+
+template <int GROUP_BIT_COUNT>
 int run_approach(
     bench_data* bd, int approach_id, int row_count_variant, size_t row_count,
     int grid_dim, int block_dim, int stream_count, int iteration)
@@ -1107,7 +1146,17 @@ int run_approach(
                 bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 14: return -1;
+        case 14: {
+            run_approach_global_array<GROUP_BIT_COUNT>(
+                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 15: {
+            run_approach_global_array<GROUP_BIT_COUNT>(
+                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 16: return -1;
         default: assert(false);
     }
     return approach_id + 1;
