@@ -58,6 +58,8 @@ approach_colors = {
     "per_thread_hashtable_bank_optimized": "lime",
     "global_array": "cyan",
     "global_array_optimistic": "sienna",
+    "shared_mem_array": "black",
+    "shared_mem_array_optimistic": "blue",
 }
 approach_markers = {
     "hashtable": "^",
@@ -77,6 +79,8 @@ approach_markers = {
     "per_thread_hashtable_bank_optimized": "4",
     "global_array": "D",
     "global_array_optimistic": "d",
+    "shared_mem_array": "H",
+    "shared_mem_array_optimistic": "h",
 }
 
 

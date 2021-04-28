@@ -7,7 +7,7 @@
 
 uint64_t* global_array = nullptr;
 bool* global_array_occurance_flags;
-__device__ cudaUInt64_t global_array_writeout_idx;
+__device__ cudaUInt64_t global_array_groups_found;
 
 static inline void group_by_global_array_init(size_t max_groups)
 {
@@ -27,7 +27,7 @@ static inline void group_by_global_array_fin()
     global_array = NULL;
 }
 
-template <int MAX_GROUP_BITS, bool OPTIMISTIC>
+template <bool OPTIMISTIC>
 __device__ void global_array_insert(
     uint64_t* array, bool* occurrance_array, uint64_t group, uint64_t aggregate)
 {
@@ -51,8 +51,7 @@ __global__ void kernel_fill_global_array(
     for (size_t i = tid; i < input.row_count; i += stride) {
         uint64_t group = input.group_col[i];
         uint64_t agg = input.aggregate_col[i];
-        global_array_insert<MAX_GROUP_BITS, OPTIMISTIC>(
-            array, occurrance_array, group, agg);
+        global_array_insert<OPTIMISTIC>(array, occurrance_array, group, agg);
     }
 }
 
@@ -68,7 +67,7 @@ __global__ void kernel_write_out_global_array(
     int stride = blockDim.x * gridDim.x * stream_count;
     for (size_t i = tid; i < ARRAY_SIZE; i += stride) {
         if (!occurance_array[i]) continue;
-        size_t out_idx = atomicAdd(&global_array_writeout_idx, 1);
+        size_t out_idx = atomicAdd(&global_array_groups_found, 1);
         output.group_col[out_idx] = i;
         output.aggregate_col[out_idx] = occurance_array[i] ? array[i] : 0;
         occurance_array[i] = false;
@@ -94,7 +93,7 @@ void group_by_global_array(
     // reset number of groups found
     size_t zero = 0;
     cudaMemcpyToSymbol(
-        global_array_writeout_idx, &zero, sizeof(zero), 0,
+        global_array_groups_found, &zero, sizeof(zero), 0,
         cudaMemcpyHostToDevice);
     // for stream_count 0 we use the default stream,
     // but thats actually still one stream not zero
@@ -128,6 +127,6 @@ void group_by_global_array(
     // read out number of groups found
     // this waits for the kernels to complete since it's in the default stream
     cudaMemcpyFromSymbol(
-        &gd->output.row_count, global_array_writeout_idx, sizeof(size_t), 0,
+        &gd->output.row_count, global_array_groups_found, sizeof(size_t), 0,
         cudaMemcpyDeviceToHost);
 }

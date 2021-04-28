@@ -265,13 +265,13 @@ void group_by_shared_mem_hashtable(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         if (OPTIMISTIC) {
-            kernel_shared_mem_ht<MAX_GROUP_BITS>
+            kernel_shared_mem_ht_optimistic<MAX_GROUP_BITS>
                 <<<grid_dim, block_dim, 0, stream>>>(
                     gd->input, group_ht_entry<false>::table,
                     actual_stream_count, i);
         }
         else {
-            kernel_shared_mem_ht_optimistic<MAX_GROUP_BITS>
+            kernel_shared_mem_ht<MAX_GROUP_BITS>
                 <<<grid_dim, block_dim, 0, stream>>>(
                     gd->input, group_ht_entry<false>::table,
                     actual_stream_count, i);
