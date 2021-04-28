@@ -144,6 +144,7 @@ __global__ void kernel_shared_mem_ht_optimistic(
     }
     __syncthreads();
     size_t i = tid;
+    size_t last_check = 0;
     for (; i < input.row_count; i += stride) {
         uint64_t group = input.group_col[i];
         uint64_t aggregate = input.aggregate_col[i];
@@ -180,7 +181,8 @@ __global__ void kernel_shared_mem_ht_optimistic(
             }
         }
         atomicAdd((cudaUInt64_t*)&hte->aggregate, aggregate);
-        if ((i - threadIdx.x) & 0xFF == 0) {
+        if (i - last_check > MAX_GROUPS) {
+            last_check = i;
             if (groups_found == MAX_GROUPS) {
                 i += stride;
                 break;

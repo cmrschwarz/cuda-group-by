@@ -81,15 +81,14 @@ __global__ void kernel_shared_mem_array_optimistic(
     __shared__ uint64_t shared_mem_array[MAX_GROUPS];
     // datatypes smaller than int have no atomicOr :/,
     // otherwise bool would suffice
-    __shared__ int shared_mem_array_occurance[MAX_GROUPS];
+    __shared__ bool shared_mem_array_occurance[MAX_GROUPS];
     __shared__ int unfound_groups;
+    // make sure this isn't zero
+    if (threadIdx.x == 0) unfound_groups = 17;
 
-    if (threadIdx.x == 0) {
-        unfound_groups = 0;
-    }
-
-    int tid = threadIdx.x + blockIdx.x * blockDim.x +
-              stream_idx * blockDim.x * gridDim.x;
+    size_t base_id =
+        blockIdx.x * blockDim.x + stream_idx * blockDim.x * gridDim.x;
+    size_t last_check = 0;
     int stride = blockDim.x * gridDim.x * stream_count;
 
     for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
@@ -97,25 +96,35 @@ __global__ void kernel_shared_mem_array_optimistic(
         shared_mem_array_occurance[i] = 0;
     }
     __syncthreads();
-    size_t i = tid;
-    for (; i < input.row_count; i += stride) {
-        uint64_t group = input.group_col[i];
-        uint64_t aggregate = input.aggregate_col[i];
-        atomicAdd((cudaUInt64_t*)&shared_mem_array[group], aggregate);
-        if (atomicOr(&shared_mem_array_occurance[group], 1) == 0) {
-            atomicAdd((int*)&unfound_groups, 1);
+    for (; base_id < input.row_count; base_id += stride) {
+        size_t i = base_id + threadIdx.x;
+        if (i < input.row_count) {
+            uint64_t group = input.group_col[i];
+            uint64_t aggregate = input.aggregate_col[i];
+            atomicAdd((cudaUInt64_t*)&shared_mem_array[group], aggregate);
+            shared_mem_array_occurance[group] = true;
         }
-        if (tid - threadIdx.x & 0xFF == 0) {
-            if (unfound_groups == MAX_GROUPS) break;
+        if (base_id - last_check > MAX_GROUPS) {
+            last_check = base_id;
+            if (threadIdx.x == 0) unfound_groups = 0;
+            __syncthreads();
+            int unfound_count_thread = 0;
+            for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
+                unfound_count_thread += shared_mem_array_occurance[i] ? 0 : 1;
+            }
+            atomicAdd(&unfound_groups, unfound_count_thread);
+            __syncthreads();
+            if (unfound_groups == 0) break;
         }
     }
-    for (; i < input.row_count; i += stride) {
+    for (size_t i = base_id + stride + threadIdx.x; i < input.row_count;
+         i += stride) {
         uint64_t group = input.group_col[i];
         uint64_t aggregate = input.aggregate_col[i];
         atomicAdd((cudaUInt64_t*)&shared_mem_array[group], aggregate);
     }
     __syncthreads();
-    if (unfound_groups == MAX_GROUPS) {
+    if (unfound_groups == 0) {
         for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
             global_array_insert<false>(
                 global_array, global_occurance_array, i, shared_mem_array[i]);
