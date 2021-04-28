@@ -32,7 +32,7 @@
 #endif
 
 #define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
 #define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP false
@@ -42,6 +42,7 @@
 
 #define ENABLE_APPROACH_GLOBAL_ARRAY false
 #define ENABLE_APPROACH_SHARED_MEM_ARRAY true
+#define ENABLE_APPROACH_PER_THREAD_ARRAY true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
@@ -85,6 +86,10 @@
 
 #if ENABLE_APPROACH_SHARED_MEM_ARRAY
 #    include "group_by_shared_mem_array.cuh"
+#endif
+
+#if ENABLE_APPROACH_PER_THREAD_ARRAY
+#    include "group_by_per_thread_array.cuh"
 #endif
 
 #if BIG_DATA
@@ -287,10 +292,16 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_SHARED_MEM_ARRAY
     group_by_shared_mem_array_init(BENCHMARK_GROUPS_MAX);
 #endif
+#if ENABLE_APPROACH_PER_THREAD_ARRAY
+    group_by_per_thread_array_init(BENCHMARK_GROUPS_MAX);
+#endif
 }
 
 void free_bench_data(bench_data* bd)
 {
+#if ENABLE_APPROACH_PER_THREAD_ARRAY
+    group_by_per_thread_array_fin();
+#endif
 #if ENABLE_APPROACH_SHARED_MEM_ARRAY
     group_by_shared_mem_array_fin();
 #endif
@@ -1112,6 +1123,38 @@ void run_approach_shared_mem_array(
 }
 
 template <int GROUP_BIT_COUNT>
+void run_approach_per_thread_array(
+    bench_data* bd, bool bank_optimized, int row_count_variant,
+    size_t row_count, int grid_dim, int block_dim, int stream_count,
+    int iteration)
+{
+#if ENABLE_APPROACH_PER_THREAD_ARRAY
+    if (bank_optimized) return; // TODO: fix this approach
+    if (!approach_per_thread_array_available(
+            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
+        return;
+    }
+    if (bank_optimized) {
+        group_by_per_thread_array<GROUP_BIT_COUNT, true>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "per_thread_array_bank_optimized");
+    }
+    else {
+        group_by_per_thread_array<GROUP_BIT_COUNT, false>(
+            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+            bd->events, bd->start_event, bd->end_event);
+        record_time_and_validate(
+            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
+            stream_count, iteration, "per_thread_array");
+    }
+
+#endif
+}
+
+template <int GROUP_BIT_COUNT>
 int run_approach(
     bench_data* bd, int approach_id, int row_count_variant, size_t row_count,
     int grid_dim, int block_dim, int stream_count, int iteration)
@@ -1207,7 +1250,17 @@ int run_approach(
                 bd, true, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 18: return -1;
+        case 18: {
+            run_approach_per_thread_array<GROUP_BIT_COUNT>(
+                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 19: {
+            run_approach_per_thread_array<GROUP_BIT_COUNT>(
+                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 20: return -1;
         default: assert(false);
     }
     return approach_id + 1;
