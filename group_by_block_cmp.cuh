@@ -174,20 +174,20 @@ __device__ void block_cmp_naive_write_out(
 
 template <int MAX_GROUP_BITS>
 __device__ void block_cmp_hashmap_write_out(
-    db_table output, group_ht_entry<true>* hashtable, int groups_in_thread,
+    db_table output, group_ht_entry<>* hashtable, int groups_in_thread,
     uint64_t* thread_groups, uint64_t* thread_aggregates)
 {
     // no need for syncthreads since we are sure to have all the groups
     // that we are responsible for anyways
     for (int i = 0; i < groups_in_thread; i++) {
-        group_ht_insert<MAX_GROUP_BITS, true>(
+        group_ht_insert<MAX_GROUP_BITS>(
             hashtable, thread_groups[i], thread_aggregates[i]);
     }
 }
 
 template <int MAX_GROUP_BITS, bool NAIVE_WRITEOUT>
 __global__ void kernel_block_cmp(
-    db_table input, db_table output, group_ht_entry<true>* hashtable,
+    db_table input, db_table output, group_ht_entry<>* hashtable,
     int stream_count, int stream_idx)
 {
     size_t base_idx = (size_t)blockIdx.x * blockDim.x +
@@ -402,7 +402,7 @@ __global__ void kernel_block_cmp(
 
 template <int MAX_GROUP_BITS, bool NAIVE_WRITEOUT>
 __global__ void kernel_block_cmp_old(
-    db_table input, db_table output, group_ht_entry<true>* hashtable,
+    db_table input, db_table output, group_ht_entry<>* hashtable,
     int stream_count, int stream_idx)
 {
     __shared__ uint64_t groups[CUDA_MAX_BLOCK_SIZE];
@@ -557,13 +557,13 @@ void group_by_block_cmp(
         if (OLD_VERSION) {
             kernel_block_cmp_old<MAX_GROUP_BITS, NAIVE_WRITEOUT>
                 <<<grid_dim, block_dim, 0, stream>>>(
-                    gd->input, gd->output, group_ht_entry<true>::table,
+                    gd->input, gd->output, group_ht_entry<>::table,
                     actual_stream_count, i);
         }
         else {
             kernel_block_cmp<MAX_GROUP_BITS, NAIVE_WRITEOUT>
                 <<<grid_dim, block_dim, 0, stream>>>(
-                    gd->input, gd->output, group_ht_entry<true>::table,
+                    gd->input, gd->output, group_ht_entry<>::table,
                     actual_stream_count, i);
         }
 
@@ -573,34 +573,15 @@ void group_by_block_cmp(
     }
     if (NAIVE_WRITEOUT) {
         kernel_thread_per_group_insert_empty_group<<<1, 1>>>(gd->output);
-    }
-    else {
-        for (int i = 0; i < actual_stream_count; i++) {
-            cudaStream_t stream = stream_count ? streams[i] : 0;
-            if (stream_count > 1) {
-                // every write out kernel needs to wait on every fill kernel
-                for (int j = 0; j < stream_count; j++) {
-                    // the stream doesn't need to wait on itself
-                    if (j == i) continue;
-                    cudaStreamWaitEvent(stream, events[j], 0);
-                }
-            }
-            kernel_write_out_group_ht<MAX_GROUP_BITS, true>
-                <<<grid_dim, block_dim, 0, stream>>>(
-                    gd->output, group_ht_entry<true>::table,
-                    actual_stream_count, i);
-        }
-    }
-    CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
-    if (NAIVE_WRITEOUT) {
+        CUDA_TRY(cudaEventRecord(end_event));
+        CUDA_TRY(cudaGetLastError());
         cudaMemcpyFromSymbol(
             &gd->output.row_count, bcmp_group_count, sizeof(size_t), 0,
             cudaMemcpyDeviceToHost);
     }
     else {
-        cudaMemcpyFromSymbol(
-            &gd->output.row_count, group_ht_groups_found, sizeof(size_t), 0,
-            cudaMemcpyDeviceToHost);
+        group_by_hashtable_writeout<MAX_GROUP_BITS>(
+            gd, grid_dim, block_dim, stream_count, streams, events, start_event,
+            end_event);
     }
 }

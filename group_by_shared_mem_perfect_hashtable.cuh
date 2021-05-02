@@ -239,7 +239,7 @@ template <int MAX_GROUP_BITS>
 __global__ void kernel_shared_mem_pht(
     db_table input, shared_mem_pht_l1_entry* l1_ht, uint64_t l1_hash_const,
     shared_mem_pht_l2_occurance_map_entry* pht_l2_occurance_map,
-    group_ht_entry<false>* hashtable, int stream_count, int stream_idx)
+    group_ht_entry<>* hashtable, int stream_count, int stream_idx)
 {
     // the ternary guards against template instantiations that would
     // cause ptxas error during compilations by requiring
@@ -307,31 +307,12 @@ void group_by_shared_mem_perfect_hashtable(
         kernel_shared_mem_pht<MAX_GROUP_BITS>
             <<<grid_dim, block_dim, 0, stream>>>(
                 gd->input, pht_l1_dev, pht_l1_hash_const,
-                pht_l2_occurance_map_dev, group_ht_entry<false>::table,
+                pht_l2_occurance_map_dev, group_ht_entry<>::table,
                 actual_stream_count, i);
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
-    for (int i = 0; i < actual_stream_count; i++) {
-        cudaStream_t stream = stream_count ? streams[i] : 0;
-        if (stream_count > 1) {
-            // every write out kernel needs to wait on every fill kernel
-            for (int j = 0; j < stream_count; j++) {
-                // the stream doesn't need to wait on itself
-                if (j == i) continue;
-                cudaStreamWaitEvent(stream, events[j], 0);
-            }
-        }
-        kernel_write_out_group_ht<MAX_GROUP_BITS, false>
-            <<<grid_dim, block_dim, 0, stream>>>(
-                gd->output, group_ht_entry<false>::table, actual_stream_count,
-                i);
-    }
-    CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
-    // read out number of groups found
-    // this waits for the kernels to complete since it's in the default stream
-    cudaMemcpyFromSymbol(
-        &gd->output.row_count, group_ht_groups_found, sizeof(size_t), 0,
-        cudaMemcpyDeviceToHost);
+    group_by_hashtable_writeout<MAX_GROUP_BITS>(
+        gd, grid_dim, block_dim, stream_count, streams, events, start_event,
+        end_event);
 }

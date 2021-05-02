@@ -35,7 +35,7 @@ static inline bool approach_warp_cmp_available(
 
 template <int MAX_GROUP_BITS>
 __global__ void kernel_warp_cmp(
-    db_table input, db_table output, group_ht_entry<true>* hashtable,
+    db_table input, db_table output, group_ht_entry<>* hashtable,
     int stream_count, int stream_idx)
 {
     size_t base_idx = (size_t)blockIdx.x * blockDim.x +
@@ -222,7 +222,7 @@ __global__ void kernel_warp_cmp(
 
     // the input is processed, proceed to writeout
     if (group_assigned) {
-        group_ht_insert<MAX_GROUP_BITS, true>(
+        group_ht_insert<MAX_GROUP_BITS>(
             hashtable, assigned_group, assigned_aggregate);
     }
 }
@@ -242,29 +242,12 @@ void group_by_warp_cmp(
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         kernel_warp_cmp<MAX_GROUP_BITS><<<grid_dim, block_dim, 0, stream>>>(
-            gd->input, gd->output, group_ht_entry<true>::table,
-            actual_stream_count, i);
+            gd->input, gd->output, group_ht_entry<>::table, actual_stream_count,
+            i);
 
         if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
-    for (int i = 0; i < actual_stream_count; i++) {
-        cudaStream_t stream = stream_count ? streams[i] : 0;
-        if (stream_count > 1) {
-            // every write out kernel needs to wait on every fill kernel
-            for (int j = 0; j < stream_count; j++) {
-                // the stream doesn't need to wait on itself
-                if (j == i) continue;
-                cudaStreamWaitEvent(stream, events[j], 0);
-            }
-        }
-        kernel_write_out_group_ht<MAX_GROUP_BITS, true>
-            <<<grid_dim, block_dim, 0, stream>>>(
-                gd->output, group_ht_entry<true>::table, actual_stream_count,
-                i);
-    }
-    CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
-    cudaMemcpyFromSymbol(
-        &gd->output.row_count, group_ht_groups_found, sizeof(size_t), 0,
-        cudaMemcpyDeviceToHost);
+    group_by_hashtable_writeout<MAX_GROUP_BITS>(
+        gd, grid_dim, block_dim, stream_count, streams, events, start_event,
+        end_event);
 }
