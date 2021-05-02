@@ -156,18 +156,24 @@ void group_by_global_array_writeout(
                 }
             }
         }
+        size_t mem;
+        cub::DeviceSelect::Flagged(
+            NULL, mem, (uint64_t*)NULL, (bool*)NULL, (uint64_t*)NULL,
+            (size_t*)NULL, group_count, 0, false);
+        RELASE_ASSERT(mem <= cub_flagged_temp_storage_size);
         cub::DeviceSelect::Flagged(
             cub_flagged_temp_storage, cub_flagged_temp_storage_size,
             cub_group_iterator{}, global_array_occurance_flags,
             gd->output.group_col, global_array_groups_found_dev_ptr,
-            group_count, streams[0], false);
+            group_count, (stream_count > 1) ? streams[0] : 0, false);
         cub::DeviceSelect::Flagged(
             cub_flagged_temp_storage_2, cub_flagged_temp_storage_size,
             global_array, global_array_occurance_flags,
             gd->output.aggregate_col, global_array_groups_found_dev_ptr,
-            group_count, streams[1], false);
+            group_count, (stream_count > 1) ? streams[1] : 0, false);
         cudaMemsetAsync(
-            global_array, 0, group_count * sizeof(uint64_t), streams[1]);
+            global_array, 0, group_count * sizeof(uint64_t),
+            (stream_count > 1) ? streams[1] : 0);
         cudaMemset(global_array_occurance_flags, 0, group_count * sizeof(bool));
     }
     else {
