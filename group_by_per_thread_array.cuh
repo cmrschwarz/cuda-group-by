@@ -95,7 +95,7 @@ __global__ void kernel_per_thread_array_bank_optimized(
     }
     for (int i = 0; i < GROUP_COUNT; i += OCC_FLAGS_PACK_SIZE) {
         int end = i + OCC_FLAGS_PACK_SIZE <= GROUP_COUNT ? OCC_FLAGS_PACK_SIZE
-                                                        : GROUP_COUNT - i;
+                                                         : GROUP_COUNT - i;
         uint32_t occ_pack = occurance_flags
             [(i / OCC_FLAGS_PACK_SIZE) * ARR_STRIDE + threadIdx.x];
         for (int j = 0; j < end; j++) {
@@ -199,26 +199,7 @@ void group_by_per_thread_array(
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
-    for (int i = 0; i < actual_stream_count; i++) {
-        cudaStream_t stream = stream_count ? streams[i] : 0;
-        if (stream_count > 1) {
-            // every write out kernel needs to wait on every fill kernel
-            for (int j = 0; j < stream_count; j++) {
-                // the stream doesn't need to wait on itself
-                if (j == i) continue;
-                cudaStreamWaitEvent(stream, events[j], 0);
-            }
-        }
-        kernel_write_out_global_array<MAX_GROUP_BITS>
-            <<<grid_dim, block_dim, 0, stream>>>(
-                gd->output, global_array, global_array_occurance_flags,
-                actual_stream_count, i);
-    }
-    CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
-    // read out number of groups found
-    // this waits for the kernels to complete since it's in the default stream
-    cudaMemcpyFromSymbol(
-        &gd->output.row_count, global_array_groups_found, sizeof(size_t), 0,
-        cudaMemcpyDeviceToHost);
+    group_by_global_array_writeout<MAX_GROUP_BITS>(
+        gd, grid_dim, block_dim, stream_count, streams, events, start_event,
+        end_event);
 }

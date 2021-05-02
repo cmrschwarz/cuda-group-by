@@ -18,7 +18,7 @@
 // enforce this assumption so we can use the insert_by family of approaches
 #define GROUP_COUNT_EQUALS_GROUP_MAX_VAL true
 // use small aggregate values to ease debugging
-#define SMALL_AGGREGATE_VALS false
+#define SMALL_AGGREGATE_VALS true
 // continue in case of a validation failiure
 #define ALLOW_FAILIURE false
 // disable actual validation and just say "PASS"
@@ -37,12 +37,12 @@
 #define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE false
 
-#define ENABLE_APPROACH_GLOBAL_ARRAY false
-#define ENABLE_APPROACH_SHARED_MEM_ARRAY true
-#define ENABLE_APPROACH_PER_THREAD_ARRAY true
+#define ENABLE_APPROACH_GLOBAL_ARRAY true
+#define ENABLE_APPROACH_SHARED_MEM_ARRAY false
+#define ENABLE_APPROACH_PER_THREAD_ARRAY false
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
@@ -112,11 +112,10 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
-
 #    define BENCHMARK_ROWS_BITS_MAX 26
 #    define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
-    128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+    32, 128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 // const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
 #endif
 
@@ -136,7 +135,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #if BIG_DATA
 #    define BENCHMARK_GROUP_BITS_MAX BENCHMARK_ROWS_BITS_MAX
 #else
-#    define BENCHMARK_GROUP_BITS_MAX 20
+#    define BENCHMARK_GROUP_BITS_MAX 26
 #endif
 
 #if SMALL_GROUP_VALS
@@ -1065,30 +1064,30 @@ void run_approach_throughput_test(
 #endif
 }
 
-template <int GROUP_BIT_COUNT>
+template <int GROUP_BIT_COUNT, bool OPTIMISTIC, bool COMPRESSTORE>
 void run_approach_global_array(
-    bench_data* bd, bool optimistic, int row_count_variant, size_t row_count,
-    int grid_dim, int block_dim, int stream_count, int iteration)
+    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
+    int block_dim, int stream_count, int iteration)
 {
 #if ENABLE_APPROACH_GLOBAL_ARRAY
     if (!approach_global_array_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
         return;
     }
-    if (optimistic) {
-        group_by_global_array<GROUP_BIT_COUNT, true>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
+
+    group_by_global_array<GROUP_BIT_COUNT, OPTIMISTIC, COMPRESSTORE>(
+        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
+        bd->events, bd->start_event, bd->end_event);
+    const char* ap_name;
+    if (OPTIMISTIC && COMPRESSTORE) {
+        ap_name = "global_array_optimistic_compresstore";
     }
-    else {
-        group_by_global_array<GROUP_BIT_COUNT, false>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-    }
+    if (OPTIMISTIC && !COMPRESSTORE) ap_name = "global_array_optimistic";
+    if (!OPTIMISTIC && COMPRESSTORE) ap_name = "global_array_compresstore";
+    if (!OPTIMISTIC && !COMPRESSTORE) ap_name = "global_array";
     record_time_and_validate(
         bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration,
-        optimistic ? "global_array_optimistic" : "global_array");
+        stream_count, iteration, ap_name);
 #endif
 }
 
@@ -1129,7 +1128,6 @@ void run_approach_per_thread_array(
     int iteration)
 {
 #if ENABLE_APPROACH_PER_THREAD_ARRAY
-    if (bank_optimized) return; // TODO: fix this approach
     if (!approach_per_thread_array_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
         return;
@@ -1231,36 +1229,41 @@ int run_approach(
                 stream_count, iteration);
         } break;
         case 14: {
-            run_approach_global_array<GROUP_BIT_COUNT>(
-                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_global_array<GROUP_BIT_COUNT, false, false>(
+                bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 15: {
-            run_approach_global_array<GROUP_BIT_COUNT>(
-                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_global_array<GROUP_BIT_COUNT, false, true>(
+                bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 16: {
-            run_approach_shared_mem_array<GROUP_BIT_COUNT>(
-                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_global_array<GROUP_BIT_COUNT, true, false>(
+                bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 17: {
-            run_approach_shared_mem_array<GROUP_BIT_COUNT>(
-                bd, true, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_global_array<GROUP_BIT_COUNT, true, true>(
+                bd, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 18: {
-            run_approach_per_thread_array<GROUP_BIT_COUNT>(
-                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+            run_approach_shared_mem_array<GROUP_BIT_COUNT>(
+                bd, true, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
         case 19: {
             run_approach_per_thread_array<GROUP_BIT_COUNT>(
+                bd, false, row_count_variant, row_count, grid_dim, block_dim,
+                stream_count, iteration);
+        } break;
+        case 20: {
+            run_approach_per_thread_array<GROUP_BIT_COUNT>(
                 bd, true, row_count_variant, row_count, grid_dim, block_dim,
                 stream_count, iteration);
         } break;
-        case 20: return -1;
+        case 21: return -1;
         default: assert(false);
     }
     return approach_id + 1;

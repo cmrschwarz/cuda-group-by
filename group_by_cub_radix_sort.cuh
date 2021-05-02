@@ -7,11 +7,11 @@
 #pragma diag_suppress initialization_not_reachable
 
 #ifdef CUDA_GROUP_BY_CMAKE_BUILD
-#include <cub/cub.cuh>
+#    include <cub/cub.cuh>
 #else
 // always use the submodule version when we are not building with cmake
 // and don't have a proper include path setup
-#include "./deps/cub/cub/cub.cuh"
+#    include "./deps/cub/cub/cub.cuh"
 #endif
 
 static void* cub_radix_sort_temp_storage;
@@ -81,9 +81,9 @@ void group_by_cub_radix_sort(
         cub_radix_sort_sorted_group_col, gd->output.group_col,
         cub_radix_sort_sorted_aggregate_col, gd->output.aggregate_col,
         cub_radix_sort_num_runs_dev_ptr, cub::Sum(), gd->input.row_count);
+    CUDA_TRY(cudaEventRecord(end_event));
+    CUDA_TRY(cudaGetLastError());
     cudaMemcpy(
         (void*)&gd->output.row_count, cub_radix_sort_num_runs_dev_ptr,
         sizeof(size_t), cudaMemcpyDeviceToHost);
-    CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
 }
