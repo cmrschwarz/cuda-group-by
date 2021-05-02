@@ -24,13 +24,13 @@ __device__ size_t cub_radix_sort_num_runs;
 
 void group_by_cub_radix_sort_init(size_t max_row_count)
 {
-    size_t reduce_max_storage;
+    size_t reduce_max_storage = 0;
     cub::DeviceReduce::ReduceByKey(
         NULL, reduce_max_storage, (uint64_t*)NULL, (uint64_t*)NULL,
         (uint64_t*)NULL, (uint64_t*)NULL, (size_t*)NULL, cub::Sum(),
         max_row_count);
 
-    size_t sort_max_storage;
+    size_t sort_max_storage = 0;
     cub::DeviceRadixSort::SortPairs(
         NULL, sort_max_storage, (uint64_t*)NULL, (uint64_t*)NULL,
         (uint64_t*)NULL, (uint64_t*)NULL, max_row_count);
@@ -70,12 +70,23 @@ void group_by_cub_radix_sort(
 {
 
     CUDA_TRY(cudaEventRecord(start_event));
+    int end_bit;
 
+#if GROUP_COUNT_EQUALS_GROUP_MAX_VAL
+    end_bit = MAX_GROUP_BITS;
+#else
+    end_bit = sizeof(uint64_t) * 8;
+#endif
+    size_t mem;
+    cub::DeviceRadixSort::SortPairs(
+        NULL, mem, (uint64_t*)NULL, (uint64_t*)NULL, (uint64_t*)NULL,
+        (uint64_t*)NULL, gd->input.row_count);
+    RELASE_ASSERT(mem <= cub_radix_sort_temp_storage_size);
     cub::DeviceRadixSort::SortPairs(
         cub_radix_sort_temp_storage, cub_radix_sort_temp_storage_size,
         gd->input.group_col, cub_radix_sort_sorted_group_col,
         gd->input.aggregate_col, cub_radix_sort_sorted_aggregate_col,
-        gd->input.row_count);
+        gd->input.row_count, 0, end_bit);
     cub::DeviceReduce::ReduceByKey(
         cub_radix_sort_temp_storage, cub_radix_sort_temp_storage_size,
         cub_radix_sort_sorted_group_col, gd->output.group_col,
