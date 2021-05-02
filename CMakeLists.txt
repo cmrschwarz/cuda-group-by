@@ -24,7 +24,7 @@ set(CMAKE_CXX_STANDARD 14)
         message(FATAL_ERROR "failed to get cc by running get_cc: ${PROC_RES}")
     endif()
 
-    # message(STATUS "Cuda Compute Capability: ${CUDA_COMP_CAP}")
+    message(STATUS "Cuda Compute Capability: ${CUDA_COMP_CAP}")
     # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --generate-code arch=compute_${CUDA_COMP_CAP},code=sm_${CUDA_COMP_CAP}")
 
 # add our benchmark binary and its dependencies
@@ -35,6 +35,14 @@ set(CMAKE_CXX_STANDARD 14)
         "use the cub sumodulle located in ./deps/cub instead of the system version" 
         ON
     )
+    option(
+        CUDA_GROUP_BY_DEBUG_SYMBOLS
+        "add debug symbols for use with night compute" 
+        ON
+    )
+    if(${CUDA_GROUP_BY_DEBUG_SYMBOLS})
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -lineinfo")
+    endif()
 
     find_package(OpenMP)
     if(OpenMP_CXX_FOUND)

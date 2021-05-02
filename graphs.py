@@ -64,7 +64,7 @@ approach_colors = {
     "global_array": "seagreen",
     "global_array_compresstore": "plum",
     "global_array_optimistic": "lightsteelblue",
-    "global_array_optimistic_compresstore": "lightcyan",
+    "global_array_optimistic_compresstore": "palevioletred",
     "shared_mem_array": "black",
     "shared_mem_array_optimistic": "blue",
     "per_thread_array": "magenta",
