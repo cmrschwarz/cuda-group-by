@@ -26,7 +26,6 @@ static inline bool approach_per_thread_array_available(
     return PER_THREAD_ARRAY_SHARED_MEM_SUFFICIENT(group_bits, block_dim);
 }
 
-// FIXME
 template <int MAX_GROUP_BITS>
 __global__ void kernel_per_thread_array_bank_optimized(
     db_table input, uint64_t* global_array, bool* global_occurance_array,
@@ -43,7 +42,7 @@ __global__ void kernel_per_thread_array_bank_optimized(
     // + 16 KiB overhang that more than suffice to store all the flag bits
     constexpr bool FLAGS_FIT_IN_NON_POW2_SHARED_MEM_OVERHANG =
         (CUDA_SHARED_MEM_PER_BLOCK -
-         (((size_t)1) << CUDA_SHARED_MEM_BITS_PER_BLOCK)) >
+         (((size_t)1) << CUDA_SHARED_MEM_BITS_PER_BLOCK)) >=
         (GROUP_COUNT * CUDA_MAX_BLOCK_SIZE / 8);
 
     constexpr int MAX_BLOCK_BITS =
@@ -63,8 +62,9 @@ __global__ void kernel_per_thread_array_bank_optimized(
 
     const int ARR_STRIDE = blockDim.x;
 
-    int tid = threadIdx.x * blockIdx.x * blockDim.x +
+    int tid = threadIdx.x + blockIdx.x * blockDim.x +
               stream_idx * blockDim.x * gridDim.x;
+
     int stride = blockDim.x * gridDim.x * stream_count;
 
     __shared__ uint32_t aggregate_low_bytes[GROUP_COUNT * MAX_BLOCK_SIZE];
@@ -91,15 +91,15 @@ __global__ void kernel_per_thread_array_bank_optimized(
 
         occurance_flags
             [(group / OCC_FLAGS_PACK_SIZE) * ARR_STRIDE + threadIdx.x] |=
-            (uint64_t)1 << (group % OCC_FLAGS_PACK_SIZE);
+            (uint32_t)1 << (group % OCC_FLAGS_PACK_SIZE);
     }
     for (int i = 0; i < GROUP_COUNT; i += OCC_FLAGS_PACK_SIZE) {
-        int end = i + OCC_FLAGS_PACK_SIZE < GROUP_COUNT ? OCC_FLAGS_PACK_SIZE
+        int end = i + OCC_FLAGS_PACK_SIZE <= GROUP_COUNT ? OCC_FLAGS_PACK_SIZE
                                                         : GROUP_COUNT - i;
         uint32_t occ_pack = occurance_flags
             [(i / OCC_FLAGS_PACK_SIZE) * ARR_STRIDE + threadIdx.x];
         for (int j = 0; j < end; j++) {
-            if ((occ_pack >> j) & 0x1) {
+            if ((occ_pack >> j) & 0x1 == 1) {
                 int group = i + j;
                 int arr_idx = group * ARR_STRIDE + threadIdx.x;
                 uint64_t aggregate = aggregate_low_bytes[arr_idx];
