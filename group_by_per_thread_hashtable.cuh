@@ -74,8 +74,8 @@ __global__ void kernel_per_thread_hashtable_bank_optimized(
         aggregate_high_bytes[PER_THREAD_HT_CAPACITY * MAX_BLOCK_SIZE];
     __shared__ uint32_t
         aggregate_low_bytes[PER_THREAD_HT_CAPACITY * MAX_BLOCK_SIZE];
-    int tid = threadIdx.x + blockIdx.x * blockDim.x +
-              stream_idx * blockDim.x * gridDim.x;
+    int tid_flat = threadIdx.x + blockIdx.x * blockDim.x +
+                   stream_idx * blockDim.x * gridDim.x;
     int stride = blockDim.x * gridDim.x * stream_count;
 
     for (int i = 0; i < PER_THREAD_HT_CAPACITY; i++) {
@@ -86,7 +86,7 @@ __global__ void kernel_per_thread_hashtable_bank_optimized(
         aggregate_low_bytes[i * HT_STRIDE + tid] = 0;
         aggregate_high_bytes[i * HT_STRIDE + tid] = 0;
     }
-    for (size_t i = tid; i < input.row_count; i += stride) {
+    for (size_t i = tid_flat; i < input.row_count; i += stride) {
         uint64_t group = input.group_col[i];
         uint64_t aggregate = input.aggregate_col[i];
         if (group == PER_THREAD_HT_EMPTY_GROUP_VAL) {

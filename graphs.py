@@ -5,6 +5,8 @@ import matplotlib.ticker as mtick
 from matplotlib.axes import Axes
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import LinearSegmentedColormap
+
+from datetime import datetime
 import csv
 import sys
 import multiprocessing
@@ -41,6 +43,9 @@ legacy_approach_remap = {
     "threads_per_group": "warp_cmp",
     "hashtable_lazy_out_idx": "hashtable",
 }
+
+
+
 approach_colors = {
     "hashtable": "darkorange",
     "hashtable_eager_out_idx": "green",
@@ -56,10 +61,11 @@ approach_colors = {
     "throughput_test": "lightgray",
     "per_thread_hashtable": "teal",
     "per_thread_hashtable_bank_optimized": "lime",
-    "global_array": "cyan",
+    "global_array": "seagreen",
     "global_array_optimistic": "sienna",
     "shared_mem_array": "black",
     "shared_mem_array_optimistic": "blue",
+    "per_thread_array": "magenta",
 }
 approach_markers = {
     "hashtable": "^",
@@ -81,6 +87,7 @@ approach_markers = {
     "global_array_optimistic": "d",
     "shared_mem_array": "H",
     "shared_mem_array_optimistic": "h",
+    "per_thread_array": "p",
 }
 
 
@@ -226,7 +233,8 @@ def throughput_over_group_count(data, log=False):
         y = []
         for gc in group_counts:
             gc_rows = by_group_count[gc]
-            classes = classify_mult(gc_rows, [ROW_COUNT_COL, GROUP_COUNT_COL, STREAM_COUNT_COL])
+            classes = classify_mult(gc_rows, [GRID_DIM_COL, BLOCK_DIM_COL, STREAM_COUNT_COL])
+            #classes = classify_mult(gc_rows, [ROW_COUNT_COL, GROUP_COUNT_COL, STREAM_COUNT_COL])
             avg, _ = highest_class_average(classes, THROUGHPUT_COL)
             y.append(avg)
 
@@ -251,7 +259,7 @@ def throughput_over_stream_count(data, group_count):
     ax.set_xlabel("stream count")
     ax.set_ylabel("throughput (GiB/s, 16 B per row)")
     max_rowcount = max_col_val(data, ROW_COUNT_COL)
-    ax.set_title(f"Throughput over Stream Count (row_count = {max_rowcount}, group_count={group_count}, best in class)")
+    ax.set_title(f"Throughput over Stream Count (row_count = {max_rowcount}, group_count={group_count}, best line in class)")
 
     rowcount_filtered = filter_col_val(data, ROW_COUNT_COL, max_rowcount)
     groupcount_filtered = filter_col_val(rowcount_filtered, GROUP_COUNT_COL, group_count)
@@ -887,6 +895,11 @@ def read_csv(path):
         else:
             raise ValueError("unexpected column count in " + path)
 
+        if datetime.fromtimestamp(os.path.getctime(path)) < datetime.fromisoformat("2021-04-27"):
+            # correct for switched up labeling in older benchmarks
+            legacy_approach_remap["shared_mem_hashtable"] = "shared_mem_hashtable_optimistic"
+            legacy_approach_remap["shared_mem_hashtable_optimistic"] = "shared_mem_hashtable"
+
         for ap in approach_colors:
             if ap not in legacy_approach_remap:
                 legacy_approach_remap[ap] = ap
@@ -979,7 +992,7 @@ def main():
     for f in os.listdir(output_path):
         if ("pad" + f)[-4:] == ".png":
             os.remove(output_path + "/" + f)
-            
+            # pass
     
     #read in data
     data_raw = read_csv(input_path)
