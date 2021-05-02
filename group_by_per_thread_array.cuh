@@ -80,7 +80,7 @@ __global__ void kernel_per_thread_array_bank_optimized(
     }
 
     for (size_t i = tid; i < input.row_count; i += stride) {
-        int group = (int)input.group_col[i];
+        uint64_t group = input.group_col[i];
         uint64_t aggregate = input.aggregate_col[i];
         int arr_idx = group * ARR_STRIDE + threadIdx.x;
         uint64_t stored_agg = aggregate_low_bytes[arr_idx];
@@ -100,8 +100,8 @@ __global__ void kernel_per_thread_array_bank_optimized(
             [(i / OCC_FLAGS_PACK_SIZE) * ARR_STRIDE + threadIdx.x];
         for (int j = 0; j < end; j++) {
             if ((occ_pack >> j) & 0x1 == 1) {
-                int group = i + j;
-                int arr_idx = group * ARR_STRIDE + threadIdx.x;
+                uint64_t group = i + j;
+                size_t arr_idx = group * ARR_STRIDE + threadIdx.x;
                 uint64_t aggregate = aggregate_low_bytes[arr_idx];
                 aggregate |= ((uint64_t)aggregate_high_bytes[arr_idx]) << 32;
                 global_array_insert<true>(
@@ -158,7 +158,7 @@ __global__ void kernel_per_thread_array(
         uint32_t occ_pack = per_thread_occurance_flags[i / OCC_FLAGS_PACK_SIZE];
         for (int j = 0; j < end; j++) {
             if ((occ_pack >> j) & 0x1) {
-                int group = i + j;
+                uint64_t group = i + j;
                 global_array_insert<true>(
                     global_array, global_occurance_array, group,
                     per_thread_array[group]);

@@ -60,7 +60,7 @@ __global__ void kernel_shared_mem_array(
     __syncthreads();
     for (uint64_t i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
         if (!shared_mem_array_occurance[i]) continue;
-        global_array_insert<false>(
+        global_array_insert<true>(
             global_array, global_occurance_array, i, shared_mem_array[i]);
     }
 }
@@ -83,12 +83,16 @@ __global__ void kernel_shared_mem_array_optimistic(
     // otherwise bool would suffice
     __shared__ bool shared_mem_array_occurance[MAX_GROUPS];
     __shared__ int unfound_groups;
-    // make sure this isn't zero
-    if (threadIdx.x == 0) unfound_groups = 17;
+    // make sure this isn't zero, so if we never do a check
+    // we don't use the fast writeout path
+    if (threadIdx.x == 0) unfound_groups = 1;
 
     size_t base_id =
         blockIdx.x * blockDim.x + stream_idx * blockDim.x * gridDim.x;
-    size_t last_check = 0;
+
+    size_t check_interval = input.row_count / 128;
+    if (check_interval < MAX_GROUPS) check_interval = MAX_GROUPS;
+    size_t next_check = check_interval;
     int stride = blockDim.x * gridDim.x * stream_count;
 
     for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
@@ -104,8 +108,12 @@ __global__ void kernel_shared_mem_array_optimistic(
             atomicAdd((cudaUInt64_t*)&shared_mem_array[group], aggregate);
             shared_mem_array_occurance[group] = true;
         }
-        if (base_id - last_check > MAX_GROUPS) {
-            last_check = base_id;
+        if (base_id >= next_check) {
+            next_check += check_interval;
+            // necessary so thread 0 doesn't race ahead after a check
+            // and resets unfound_groups to zero for the next check
+            // before somebody else can decide not to break based on it
+            __syncthreads();
             if (threadIdx.x == 0) unfound_groups = 0;
             __syncthreads();
             int unfound_count_thread = 0;
@@ -126,14 +134,14 @@ __global__ void kernel_shared_mem_array_optimistic(
     __syncthreads();
     if (unfound_groups == 0) {
         for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
-            global_array_insert<false>(
+            global_array_insert<true>(
                 global_array, global_occurance_array, i, shared_mem_array[i]);
         }
     }
     else {
         for (int i = threadIdx.x; i < MAX_GROUPS; i += blockDim.x) {
             if (!shared_mem_array_occurance[i]) continue;
-            global_array_insert<false>(
+            global_array_insert<true>(
                 global_array, global_occurance_array, i, shared_mem_array[i]);
         }
     }
