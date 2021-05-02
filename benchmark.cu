@@ -12,7 +12,7 @@
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 // use small group values to ease debugging
 #define SMALL_GROUP_VALS true
 // enforce this assumption so we can use the insert_by family of approaches
@@ -33,9 +33,9 @@
 
 #define ENABLE_APPROACH_HASHTABLE true
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
-#define ENABLE_APPROACH_WARP_CMP true
-#define ENABLE_APPROACH_BLOCK_CMP true
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
+#define ENABLE_APPROACH_WARP_CMP false
+#define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
@@ -44,9 +44,11 @@
 #define ENABLE_APPROACH_SHARED_MEM_ARRAY true
 #define ENABLE_APPROACH_PER_THREAD_ARRAY true
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
-#define ENABLE_BLOCK_CMP_OLD true
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
+#define ENABLE_BLOCK_CMP_OLD false
+#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE false
+#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC false
 
 #if ENABLE_APPROACH_HASHTABLE
 #    include "group_by_hashtable.cuh"
@@ -95,14 +97,14 @@
 #if BIG_DATA
 #    define ITERATION_COUNT 5
 #else
-#    define ITERATION_COUNT 3
+#    define ITERATION_COUNT 2
 #endif
 #if BIG_DATA
 #    define BENCHMARK_STREAMS_MAX 8
 const size_t benchmark_stream_count_variants[] = {0, 4, BENCHMARK_STREAMS_MAX};
 #else
-#    define BENCHMARK_STREAMS_MAX 4
-const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
+#    define BENCHMARK_STREAMS_MAX 0
+const size_t benchmark_stream_count_variants[] = {0};
 #endif
 
 #if BIG_DATA
@@ -112,7 +114,7 @@ const size_t benchmark_stream_count_variants[] = {0, BENCHMARK_STREAMS_MAX};
 const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
-#    define BENCHMARK_ROWS_BITS_MAX 20
+#    define BENCHMARK_ROWS_BITS_MAX 26
 #    define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 const size_t benchmark_row_count_variants[] = {
     32, 128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
@@ -158,13 +160,13 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #define BENCHMARK_GROUPS_MAX ((size_t)1 << BENCHMARK_GROUP_BITS_MAX)
 
 #define BENCHMARK_GPU_GRID_DIM_VARIANT_COUNT                                   \
-    ARRAY_SIZE(benchmark_gpu_grid_dim_variants)
+    ((int)ARRAY_SIZE(benchmark_gpu_grid_dim_variants))
 #define BENCHMARK_GPU_BLOCK_DIM_VARIANT_COUNT                                  \
-    ARRAY_SIZE(benchmark_gpu_block_dim_variants)
+    ((int)ARRAY_SIZE(benchmark_gpu_block_dim_variants))
 #define BENCHMARK_ROW_COUNT_VARIANT_COUNT                                      \
-    ARRAY_SIZE(benchmark_row_count_variants)
+    ((int)ARRAY_SIZE(benchmark_row_count_variants))
 #define BENCHMARK_STREAM_COUNT_VARIANT_COUNT                                   \
-    ARRAY_SIZE(benchmark_stream_count_variants)
+    ((int)ARRAY_SIZE(benchmark_stream_count_variants))
 
 int OMP_THREAD_COUNT = 0;
 
@@ -468,7 +470,7 @@ void write_bench_data_omp(
         sections.push_back(std::move(sec));
     }
     size_t thread_work = max_row_count / OMP_THREAD_COUNT;
-    int i = 0;
+    size_t i = 0;
     int t = 0;
     size_t t_work = 0;
     const float slack = 0.1;
@@ -505,7 +507,7 @@ void write_bench_data_omp(
 #pragma omp parallel for
     for (int t = 0; t < OMP_THREAD_COUNT; t++) {
         int sid = -1;
-        for (int i = 0; i < sections.size(); i++) {
+        for (size_t i = 0; i < sections.size(); i++) {
             int tid = std::get<thrd_idx>(sections[i]);
             if (tid >= t) {
                 if (tid == t) sid = i;
@@ -520,7 +522,7 @@ void write_bench_data_omp(
                 // discard twice since we use the generator for group and value
                 generators[t].discard((start - gen_base) * 2);
             }
-            while (sid < sections.size() &&
+            while (sid < (int)sections.size() &&
                    std::get<thrd_idx>(sections[sid]) == t) {
                 size_t start = std::get<start_idx>(sections[sid]);
                 size_t end = std::get<end_idx>(sections[sid]);
@@ -550,7 +552,7 @@ void write_bench_data_omp(
 #pragma omp parallel for
         for (int t = 0; t < OMP_THREAD_COUNT; t++) {
             int sid = -1;
-            for (int i = 0; i < sections.size(); i++) {
+            for (size_t i = 0; i < sections.size(); i++) {
                 int tid = std::get<thrd_idx>(sections[i]);
                 if (tid >= t) {
                     if (tid == t) sid = i;
@@ -558,7 +560,7 @@ void write_bench_data_omp(
                 }
             }
             if (sid != -1) {
-                while (sid < sections.size() &&
+                while (sid < (int)sections.size() &&
                        std::get<thrd_idx>(sections[sid]) == t) {
                     size_t start = std::get<start_idx>(sections[sid]);
                     size_t end = std::get<end_idx>(sections[sid]);
@@ -585,7 +587,7 @@ void write_bench_data_omp(
                 bd->expected_output[rcv_id].clear();
                 int s_end = 0;
                 bool found = false;
-                while (s_end < sections.size()) {
+                while (s_end < (int)sections.size()) {
                     int rcv = std::get<rcv_idx>(sections[s_end]);
                     if (found && rcv != rcv_id) break;
                     if (rcv == rcv_id) found = true;
@@ -1052,6 +1054,11 @@ void run_approach_global_array(
     int block_dim, int stream_count, int iteration)
 {
 #if ENABLE_APPROACH_GLOBAL_ARRAY
+    // use runtime variables to prevent dead code warnings
+    bool optimistic = OPTIMISTIC;
+    bool compresstore = COMPRESSTORE;
+    if (!ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE && !compresstore) return;
+    if (!ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC && !optimistic) return;
     if (!approach_global_array_available(
             GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
         return;
@@ -1294,10 +1301,10 @@ int main()
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<11>(&bench_data);
+#endif
+    run_benchmarks_for_group_bit_count<13>(&bench_data);
     run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
-#endif
 
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
