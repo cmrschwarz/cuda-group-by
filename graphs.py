@@ -181,6 +181,10 @@ def highest_class_average(classes, avg_col):
         [(col_average(rows, avg_col), cl) for (cl, rows) in classes.items()]
     )
 
+def lowest_class_average(classes, avg_col):
+    return min(
+        [(col_average(rows, avg_col), cl) for (cl, rows) in classes.items()]
+    )
 
 def sort_by_col(rows, sort_col):
     return sorted(rows, key=lambda r: r[sort_col])
@@ -216,13 +220,21 @@ def abort_plot(plot_name):
 
 # graph generators
 
-def throughput_over_group_count(data, log=False):
-    plot_name = "throughput_over_group_count" + ("_log" if log else "") +".png"
+def throughput_over_group_count(data, log=False, use_runtime=False):
+    y_axis_name = ("runtime" if use_runtime else "throughput") 
+    plot_name = (
+        y_axis_name
+        +  "_over_group_count" + ("_log" if log else "") +".png"
+    )
     fig, ax = plt.subplots(1, dpi=200, figsize=(16, 7))
     ax.set_xlabel("group count")
-    ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+    if use_runtime:
+        ax.set_ylabel("runtime (ms)")
+    else:
+        ax.set_ylabel("throughput (GiB/s, 16 B per row)")
+
     max_rowcount = max_col_val(data, ROW_COUNT_COL)
-    ax.set_title(f"Throughput over Group Count (rowcount = {max_rowcount}, best in class)")
+    ax.set_title(y_axis_name.capitalize() + f" over Group Count (rowcount = {max_rowcount}, best in class)")
 
     rowcount_filtered = filter_col_val(data, ROW_COUNT_COL, max_rowcount)
 
@@ -241,7 +253,10 @@ def throughput_over_group_count(data, log=False):
             gc_rows = by_group_count[gc]
             classes = classify_mult(gc_rows, [GRID_DIM_COL, BLOCK_DIM_COL, STREAM_COUNT_COL])
             #classes = classify_mult(gc_rows, [ROW_COUNT_COL, GROUP_COUNT_COL, STREAM_COUNT_COL])
-            avg, _ = highest_class_average(classes, THROUGHPUT_COL)
+            if use_runtime:
+                avg, _ = lowest_class_average(classes, TIME_MS_COL)
+            else:
+                avg, _ = highest_class_average(classes, THROUGHPUT_COL)
             y.append(avg)
 
         ax.plot(
@@ -420,6 +435,9 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
             len(rowcount_vals) * len(dict.fromkeys(col_vals(filtered, BLOCK_DIM_COL)))
         ),
     )
+    if(len(rowcount_vals) == 1):
+        axes = [axes]
+
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
         rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
@@ -518,6 +536,8 @@ def elements_per_thread_over_group_count_heatmap(data, approach, best_in_class):
             sum([len(epsvs) for epsvs in elems_per_threads_values.values()])
         ),
     )
+    if(len(rowcount_vals) == 1):
+        axes = [axes]
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = by_row_counts[rc]
         rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
@@ -975,7 +995,7 @@ def main():
     #cli parsing
     args = sys.argv
 
-    gen_all = False  
+    gen_all = True  
     if len(args) > 1 and args[1] == "-a":
         gen_all = True
         del args[1]
@@ -997,8 +1017,8 @@ def main():
     # remove all previous pngs from the output dir
     for f in os.listdir(output_path):
         if ("pad" + f)[-4:] == ".png":
-            os.remove(output_path + "/" + f)
-            # pass
+            #os.remove(output_path + "/" + f)
+            pass
     
     #read in data
     data_raw = read_csv(input_path)
@@ -1024,6 +1044,7 @@ def main():
     #generate graphs (in parallel)
     jobs = [
         lambda: throughput_over_group_count(data_avg),
+        lambda: throughput_over_group_count(data_avg, True, True),
         lambda: throughput_over_group_count(data_avg, True),
         lambda: throughput_over_stream_count(data_avg, 32),
         lambda: col_stddev_over_row_count(data, 32, False, False, THROUGHPUT_COL, "throughput", "GiB/s, 16 B per row"),
@@ -1035,9 +1056,9 @@ def main():
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
     ]
     slow_jobs = [
-        lambda: grid_dim_block_dim_heatmap(data_avg, "shared_mem_hashtable", group_count=32),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "shared_mem_hashtable", False),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "shared_mem_hashtable", True)
+        lambda: grid_dim_block_dim_heatmap(data_avg, "global_array_optimistic", group_count=8192),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic", False),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic", True)
     ]
     if(gen_all):
         #generate a failiure heatmap for all approaches containing failiures
