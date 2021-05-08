@@ -437,7 +437,9 @@ def grid_dim_block_dim_heatmap(data, approach, group_count=None, stream_count=No
     )
     if(len(rowcount_vals) == 1):
         axes = [axes]
-
+    if(len(x_axis_vals) == 1):
+        for i in range(0, len(axes)):
+            axes[i] = [axes[i]]
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
         rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
@@ -538,6 +540,9 @@ def elements_per_thread_over_group_count_heatmap(data, approach, best_in_class):
     )
     if(len(rowcount_vals) == 1):
         axes = [axes]
+    if(len(stream_count_vals) == 1):
+        for i in range(0, len(axes)):
+            axes[i] = [axes[i]]
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = by_row_counts[rc]
         rc_min_val = min_col_val(by_row_count, THROUGHPUT_COL)
@@ -610,7 +615,7 @@ def col_stddev_over_row_count(data, group_count, relative, minimize, col, col_st
     )
     groupcount_filtered = filter_col_val(data, GROUP_COUNT_COL, group_count)
   
-    if len(groupcount_filtered) == 0:
+    if len(groupcount_filtered) == 0  or len(unique_col_vals(data, ROW_COUNT_COL)) <= 1:
         abort_plot(plot_name)
         return 
 
@@ -1017,7 +1022,7 @@ def main():
     # remove all previous pngs from the output dir
     for f in os.listdir(output_path):
         if ("pad" + f)[-4:] == ".png":
-            #os.remove(output_path + "/" + f)
+            os.remove(output_path + "/" + f)
             pass
     
     #read in data
@@ -1056,9 +1061,9 @@ def main():
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
     ]
     slow_jobs = [
-        lambda: grid_dim_block_dim_heatmap(data_avg, "global_array_optimistic", group_count=8192),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic", False),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic", True)
+        lambda: grid_dim_block_dim_heatmap(data_avg, "global_array_optimistic_compresstore", group_count=2048),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", False),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", True)
     ]
     if(gen_all):
         #generate a failiure heatmap for all approaches containing failiures

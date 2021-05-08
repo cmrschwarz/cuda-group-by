@@ -9,6 +9,8 @@
 
 // to disable openmp even if available
 #define DONT_WANT_OPENMP false
+// leave some threads for other people
+#define OMP_THREAD_LEEWAY 20
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
 // set to false to reduce data size for debugging
@@ -1276,6 +1278,10 @@ int main()
 {
 #if USE_OPENMP
     OMP_THREAD_COUNT = omp_get_max_threads();
+    if (OMP_THREAD_COUNT > OMP_THREAD_LEEWAY) {
+        OMP_THREAD_COUNT -= OMP_THREAD_LEEWAY;
+        omp_set_max_threads(OMP_THREAD_COUNT);
+    }
 #else
     OMP_THREAD_COUNT = 1;
 #endif
@@ -1290,20 +1296,21 @@ int main()
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
-    run_benchmarks_for_group_bit_count<7>(&bench_data);
     run_benchmarks_for_group_bit_count<9>(&bench_data);
-    run_benchmarks_for_group_bit_count<10>(&bench_data);
     run_benchmarks_for_group_bit_count<11>(&bench_data);
+    run_benchmarks_for_group_bit_count<15>(&bench_data);
+    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
 #if BIG_DATA
     run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<4>(&bench_data);
-#endif
+    run_benchmarks_for_group_bit_count<7>(&bench_data);
+    run_benchmarks_for_group_bit_count<10>(&bench_data);
     run_benchmarks_for_group_bit_count<13>(&bench_data);
-    run_benchmarks_for_group_bit_count<15>(&bench_data);
+    run_benchmarks_for_group_bit_count<17>(&bench_data);
+    run_benchmarks_for_group_bit_count<18>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
-
-    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
+#endif
 
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();

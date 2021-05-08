@@ -13,6 +13,9 @@
 #    include "./deps/cub/cub/cub.cuh"
 #endif
 
+// good idea in theory, bad results in practice
+#define USE_CACHE_GLOBAL_LDST false
+
 uint64_t* global_array = nullptr;
 void* cub_flagged_temp_storage = nullptr;
 void* cub_flagged_temp_storage_2 = nullptr;
@@ -84,7 +87,7 @@ __device__ void global_array_insert(
     // we can significantly reduce the overfetch by doing this
     // these intrinsics are only available since cuda version 11.0.0.0 (11000)
     if (OPTIMISTIC) {
-#if CUDA_VERSION >= 11000
+#if CUDA_VERSION >= 11000 && USE_CACHE_GLOBAL_LDST
         if (__ldcg((char*)&occurrance_array[group]) == 0) {
             __stcg((char*)&occurrance_array[group], (char)1);
         }
@@ -93,7 +96,7 @@ __device__ void global_array_insert(
 #endif
     }
     else {
-#if CUDA_VERSION >= 11000
+#if CUDA_VERSION >= 11000 && USE_CACHE_GLOBAL_LDST
         __stcg((char*)&occurrance_array[group], (char)1);
 #else
         occurrance_array[group] = true;
