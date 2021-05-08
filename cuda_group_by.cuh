@@ -1,9 +1,9 @@
 #pragma once
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
-
 #include <cstddef>
 #include <cstdint>
+#include <cuda.h>
 #include "utils.cuh"
 
 // we need this stupid type since c++ doesn't see
@@ -11,7 +11,6 @@
 // (even though they are on literally any plattform)
 // this causes e.g. atomicAdd to complain about parameter types
 typedef unsigned long long int cudaUInt64_t;
-
 #define CUDA_WARP_SIZE 32
 #define CUDA_WARP_SIZE_BITS 5
 #define CUDA_MAX_BLOCK_SIZE 1024

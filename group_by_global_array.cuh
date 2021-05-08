@@ -55,11 +55,25 @@ __device__ void global_array_insert(
     uint64_t* array, bool* occurrance_array, uint64_t group, uint64_t aggregate)
 {
     atomicAdd((cudaUInt64_t*)(array + group), aggregate);
+    // ld/st cg:cache global, so ignore l1 cache,
+    // since l1 cache lines are 128 bytes and l2 cache lines are 32,
+    // we can significantly reduce the overfetch by doing this
+    // these intrinsics are only available since cuda version 11.0.0.0 (11000)
     if (OPTIMISTIC) {
+#if CUDA_VERSION >= 11000
+        if (__ldcg((char*)&occurrance_array[group]) == 0) {
+            __stcg((char*)&occurrance_array[group], (char)1);
+        }
+#else
         if (!occurrance_array[group]) occurrance_array[group] = true;
+#endif
     }
     else {
+#if CUDA_VERSION >= 11000
+        __stcg((char*)&occurrance_array[group], (char)1);
+#else
         occurrance_array[group] = true;
+#endif
     }
 }
 
