@@ -13,7 +13,16 @@ __device__ uint64_t bcmp_empty_group_aggregate;
 
 static bool BCMP_DEBUG_ONCE = false;
 
-static inline void group_by_block_cmp_init(size_t max_groups)
+static inline void group_by_block_cmp_get_mem_requirements(
+    size_t max_groups, size_t max_rows, size_t* zeroed, size_t* initialized)
+{
+    *zeroed = 0;
+    *initialized = 0;
+}
+
+static inline void group_by_block_cmp_init(
+    size_t max_groups, size_t max_rows, void* zeroed_mem,
+    void* uninitialized_mem)
 {
     bool f = false;
     CUDA_TRY(cudaMemcpyToSymbol(
@@ -22,7 +31,8 @@ static inline void group_by_block_cmp_init(size_t max_groups)
     CUDA_TRY(cudaMemcpyToSymbol(
         bcmp_empty_group_aggregate, &zero, sizeof(zero), 0,
         cudaMemcpyHostToDevice));
-    group_by_hashtable_init(max_groups);
+    group_by_hashtable_init(
+        max_groups, max_rows, zeroed_mem, uninitialized_mem);
 }
 
 static inline void group_by_block_cmp_fin()

@@ -4,14 +4,6 @@
 
 __device__ uint64_t throughput_test_value_sink = 0;
 
-void throughput_test_init()
-{
-}
-
-void throughput_test_fin()
-{
-}
-
 static inline bool approach_throughput_test_available(
     int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)

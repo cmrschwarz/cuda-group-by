@@ -13,15 +13,7 @@ struct shared_mem_ht_entry {
     uint64_t aggregate;
 };
 
-static inline void group_by_shared_mem_hashtable_init(size_t max_groups)
-{
-    group_by_hashtable_init(max_groups);
-}
-
-static inline void group_by_shared_mem_hashtable_fin()
-{
-    group_by_hashtable_fin();
-}
+GROUP_BY_HASHTABLE_FORWARD_REQUIREMENTS(group_by_shared_mem_hashtable)
 
 static inline bool approach_shared_mem_hashtable_available(
     int group_bits, int row_count, int grid_dim, int block_dim,

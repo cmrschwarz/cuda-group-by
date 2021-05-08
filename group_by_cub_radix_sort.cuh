@@ -22,37 +22,42 @@ static uint64_t* cub_radix_sort_sorted_aggregate_col;
 static size_t* cub_radix_sort_num_runs_dev_ptr;
 __device__ size_t cub_radix_sort_num_runs;
 
-void group_by_cub_radix_sort_init(size_t max_row_count)
+static inline void group_by_cub_radix_sort_get_mem_requirements(
+    size_t max_groups, size_t max_rows, size_t* zeroed, size_t* uninitialized)
 {
     size_t reduce_max_storage = 0;
     cub::DeviceReduce::ReduceByKey(
         NULL, reduce_max_storage, (uint64_t*)NULL, (uint64_t*)NULL,
-        (uint64_t*)NULL, (uint64_t*)NULL, (size_t*)NULL, cub::Sum(),
-        max_row_count);
+        (uint64_t*)NULL, (uint64_t*)NULL, (size_t*)NULL, cub::Sum(), max_rows);
 
     size_t sort_max_storage = 0;
     cub::DeviceRadixSort::SortPairs(
         NULL, sort_max_storage, (uint64_t*)NULL, (uint64_t*)NULL,
-        (uint64_t*)NULL, (uint64_t*)NULL, max_row_count);
+        (uint64_t*)NULL, (uint64_t*)NULL, max_rows);
 
-    cub_radix_sort_temp_storage_size =
-        std::max(reduce_max_storage, sort_max_storage);
-    CUDA_TRY(cudaMalloc(
-        &cub_radix_sort_temp_storage, cub_radix_sort_temp_storage_size));
-    CUDA_TRY(cudaMalloc(
-        &cub_radix_sort_sorted_group_col, max_row_count * sizeof(uint64_t)));
-    CUDA_TRY(cudaMalloc(
-        &cub_radix_sort_sorted_aggregate_col,
-        max_row_count * sizeof(uint64_t)));
+    cub_radix_sort_temp_storage_size = ceil_to_mult(
+        std::max(reduce_max_storage, sort_max_storage),
+        CUDA_MAX_CACHE_LINE_SIZE);
+    *zeroed = 0;
+    *uninitialized =
+        cub_radix_sort_temp_storage_size + 2 * max_rows * sizeof(uint64_t);
+}
+
+void group_by_cub_radix_sort_init(
+    size_t max_groups, size_t max_rows, void* zeroed_mem,
+    void* uninitialized_mem)
+{
+    cub_radix_sort_temp_storage = uninitialized_mem;
+    cub_radix_sort_sorted_group_col =
+        (size_t*)ptradd(uninitialized_mem, cub_radix_sort_temp_storage_size);
+    cub_radix_sort_sorted_aggregate_col =
+        cub_radix_sort_sorted_group_col + max_rows;
     CUDA_TRY(cudaGetSymbolAddress(
         (void**)&cub_radix_sort_num_runs_dev_ptr, cub_radix_sort_num_runs));
 }
 
 void group_by_cub_radix_sort_fin()
 {
-    CUDA_TRY(cudaFree(cub_radix_sort_sorted_aggregate_col));
-    CUDA_TRY(cudaFree(cub_radix_sort_sorted_group_col));
-    CUDA_TRY(cudaFree(cub_radix_sort_temp_storage));
 }
 
 static inline bool approach_cub_radix_sort_available(

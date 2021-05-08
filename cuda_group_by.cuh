@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 #include <cuda.h>
 #include "utils.cuh"
 
@@ -15,6 +16,9 @@ typedef unsigned long long int cudaUInt64_t;
 #define CUDA_WARP_SIZE_BITS 5
 #define CUDA_MAX_BLOCK_SIZE 1024
 #define CUDA_MAX_BLOCK_SIZE_BITS 10
+#define CUDA_L1_CACHE_LINE_SIZE 128
+#define CUDA_L2_CACHE_LINE_SIZE 32
+#define CUDA_MAX_CACHE_LINE_SIZE CUDA_L1_CACHE_LINE_SIZE
 
 // 48 Kilobytes of shared memory per block
 #define CUDA_SHARED_MEM_PER_BLOCK 0xC000
@@ -47,7 +51,7 @@ static inline void free_db_table_gpu(db_table* t)
 }
 
 static inline void
-gpu_data_alloc(gpu_data* gd, size_t max_rows, size_t max_groups)
+gpu_data_alloc(gpu_data* gd, size_t max_groups, size_t max_rows)
 {
     alloc_db_table_gpu(&gd->input, max_rows);
     alloc_db_table_gpu(&gd->output, max_groups);
@@ -62,6 +66,17 @@ static inline void gpu_data_free(gpu_data* gd)
 static inline size_t ceil_to_pow_two(size_t v)
 {
     return v == 1 ? 1 : 1 << (8 * sizeof(size_t) - __builtin_clzl(v - 1));
+}
+
+static inline size_t ceil_to_mult(size_t v, size_t mult)
+{
+    if (v % mult != 0) v += mult - (v % mult);
+    return v;
+}
+
+static inline void* ptradd(void* ptr, size_t val)
+{
+    return (void*)(((char*)ptr) + val);
 }
 
 static inline int log2(size_t v)

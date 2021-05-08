@@ -26,6 +26,10 @@ struct group_ht_entry : public group_ht_entry_base {
     {
         // does nothing, since this is the non eager specialization of this
     }
+    __device__ void clear_out_idx()
+    {
+        // does nothing, since this is the non eager specialization of this
+    }
     // ONLY CALL THIS ONCE!
     __device__ size_t aquire_out_idx()
     {
@@ -40,6 +44,10 @@ template <> struct group_ht_entry<true> : public group_ht_entry_base {
     {
         output_idx = atomicAdd((cudaUInt64_t*)&group_ht_groups_found, 1);
     }
+    __device__ void clear_out_idx()
+    {
+        output_idx = 0;
+    }
     __device__ size_t aquire_out_idx()
     {
         return output_idx;
@@ -48,32 +56,56 @@ template <> struct group_ht_entry<true> : public group_ht_entry_base {
 template <> group_ht_entry<false>* group_ht_entry<false>::table = nullptr;
 group_ht_entry<true>* group_ht_entry<true>::table = nullptr;
 
-static inline void group_by_hashtable_init(size_t max_groups)
+static inline void group_by_hashtable_get_mem_requirements(
+    size_t max_groups, size_t max_rows, size_t* zeroed, size_t* uninitialized)
 {
-    if (group_ht_initialized) return;
-    group_ht_initialized = true;
     // if we want to use a different empty value (0 is probably a common
     // group) we will need to properly initialize this, since the memset
     // will no longer suffice
     assert(GROUP_HT_EMPTY_VALUE == 0);
-
     const size_t ht_size_eager =
         (max_groups << GROUP_HT_SIZE_SHIFT) * sizeof(group_ht_entry<true>);
-    CUDA_TRY(cudaMalloc(&group_ht_entry<true>::table, ht_size_eager));
-    CUDA_TRY(cudaMemset(group_ht_entry<true>::table, 0, ht_size_eager));
-
     const size_t ht_size_lazy =
         (max_groups << GROUP_HT_SIZE_SHIFT) * sizeof(group_ht_entry<false>);
-    CUDA_TRY(cudaMalloc(&group_ht_entry<false>::table, ht_size_lazy));
-    CUDA_TRY(cudaMemset(group_ht_entry<false>::table, 0, ht_size_lazy));
+    *zeroed = std::max(ht_size_eager, ht_size_lazy);
+    *uninitialized = 0;
 }
+
+static inline void group_by_hashtable_init(
+    size_t max_groups, size_t max_rows, void* zeroed_mem,
+    void* uninitialized_mem)
+{
+    if (group_ht_initialized) return;
+    group_ht_initialized = true;
+    group_ht_entry<true>::table = (group_ht_entry<true>*)zeroed_mem;
+    group_ht_entry<false>::table = (group_ht_entry<false>*)zeroed_mem;
+}
+
 static inline void group_by_hashtable_fin()
 {
     if (!group_ht_initialized) return;
     group_ht_initialized = false;
-    CUDA_TRY(cudaFree(group_ht_entry<false>::table));
-    CUDA_TRY(cudaFree(group_ht_entry<true>::table));
 }
+
+#define GROUP_BY_HASHTABLE_FORWARD_REQUIREMENTS(approach_name)                 \
+    static inline void approach_name##_get_mem_requirements(                   \
+        size_t max_groups, size_t max_rows, size_t* zeroed,                    \
+        size_t* uninitialized)                                                 \
+    {                                                                          \
+        group_by_hashtable_get_mem_requirements(                               \
+            max_groups, max_rows, zeroed, uninitialized);                      \
+    }                                                                          \
+    static inline void approach_name##_init(                                   \
+        size_t max_groups, size_t max_rows, void* zeroed_mem,                  \
+        void* uninitialized_mem)                                               \
+    {                                                                          \
+        group_by_hashtable_init(                                               \
+            max_groups, max_rows, zeroed_mem, uninitialized_mem);              \
+    }                                                                          \
+    static inline void approach_name##_fin()                                   \
+    {                                                                          \
+        group_by_hashtable_fin();                                              \
+    }
 
 template <int MAX_GROUP_BITS, bool EAGER_OUT_IDX>
 __device__ void group_ht_insert(
@@ -184,6 +216,7 @@ __global__ void kernel_write_out_group_ht(
             // reset for the next run
             hte->group = GROUP_HT_EMPTY_VALUE;
             hte->aggregate = 0;
+            hte->clear_out_idx();
         }
     }
 }

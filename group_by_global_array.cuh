@@ -16,39 +16,63 @@
 uint64_t* global_array = nullptr;
 void* cub_flagged_temp_storage = nullptr;
 void* cub_flagged_temp_storage_2 = nullptr;
-size_t cub_flagged_temp_storage_size;
+size_t cub_flagged_temp_storage_size = 0;
 bool* global_array_occurance_flags;
 __device__ cudaUInt64_t global_array_groups_found;
 cudaUInt64_t* global_array_groups_found_dev_ptr;
 
-static inline void group_by_global_array_init(size_t max_groups)
+static inline void group_by_global_array_get_mem_requirements(
+    size_t max_groups, size_t max_rows, size_t* zeroed, size_t* uninitialized)
 {
-    if (global_array) return;
-    CUDA_TRY(cudaMalloc(&global_array, max_groups * sizeof(uint64_t)));
-    CUDA_TRY(
-        cudaMalloc(&global_array_occurance_flags, max_groups * sizeof(bool)));
-    CUDA_TRY(cudaMemset(global_array, 0, max_groups * sizeof(uint64_t)));
-    CUDA_TRY(cudaMemset(
-        global_array_occurance_flags, false, max_groups * sizeof(bool)));
     cub::DeviceSelect::Flagged(
         NULL, cub_flagged_temp_storage_size, (uint64_t*)NULL, (bool*)NULL,
         (uint64_t*)NULL, (size_t*)NULL, max_groups, 0, false);
-    CUDA_TRY(
-        cudaMalloc(&cub_flagged_temp_storage, cub_flagged_temp_storage_size));
-    CUDA_TRY(
-        cudaMalloc(&cub_flagged_temp_storage_2, cub_flagged_temp_storage_size));
+    cub_flagged_temp_storage_size =
+        ceil_to_mult(cub_flagged_temp_storage_size, CUDA_MAX_CACHE_LINE_SIZE);
+    *uninitialized = cub_flagged_temp_storage_size * 2;
+    *zeroed = max_groups * (sizeof(uint64_t) + sizeof(bool));
+}
+
+static inline void group_by_global_array_init(
+    size_t max_groups, size_t max_rows, void* zeroed_mem,
+    void* uninitialized_mem)
+{
+    if (global_array) return;
+    assert(cub_flagged_temp_storage_size);
+    cub_flagged_temp_storage = uninitialized_mem;
+    cub_flagged_temp_storage_2 =
+        ptradd(uninitialized_mem, cub_flagged_temp_storage_size);
+    global_array = (uint64_t*)zeroed_mem;
+    global_array_occurance_flags =
+        (bool*)ptradd(zeroed_mem, max_groups * sizeof(uint64_t));
     CUDA_TRY(cudaGetSymbolAddress(
         (void**)&global_array_groups_found_dev_ptr, global_array_groups_found));
 }
 static inline void group_by_global_array_fin()
 {
     if (!global_array) return;
-    CUDA_TRY(cudaFree(cub_flagged_temp_storage_2));
-    CUDA_TRY(cudaFree(cub_flagged_temp_storage));
-    CUDA_TRY(cudaFree(global_array));
-    CUDA_TRY(cudaFree(global_array_occurance_flags));
     global_array = NULL;
 }
+
+#define GROUP_BY_GLOBAL_ARRAY_FORWARD_REQUIREMENTS(approach_name)              \
+    static inline void approach_name##_get_mem_requirements(                   \
+        size_t max_groups, size_t max_rows, size_t* zeroed,                    \
+        size_t* uninitialized)                                                 \
+    {                                                                          \
+        group_by_global_array_get_mem_requirements(                            \
+            max_groups, max_rows, zeroed, uninitialized);                      \
+    }                                                                          \
+    static inline void approach_name##_init(                                   \
+        size_t max_groups, size_t max_rows, void* zeroed_mem,                  \
+        void* uninitialized_mem)                                               \
+    {                                                                          \
+        group_by_global_array_init(                                            \
+            max_groups, max_rows, zeroed_mem, uninitialized_mem);              \
+    }                                                                          \
+    static inline void approach_name##_fin()                                   \
+    {                                                                          \
+        group_by_global_array_fin();                                           \
+    }
 
 template <bool OPTIMISTIC>
 __device__ void global_array_insert(

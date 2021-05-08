@@ -8,15 +8,7 @@
     (CUDA_SHARED_MEM_PER_BLOCK >= ((((size_t)1) << (GROUP_BITS)) *             \
                                    PER_THREAD_ARRAY_ENTRY_SIZE * BLOCK_DIM))
 
-static inline void group_by_per_thread_array_init(size_t max_groups)
-{
-    group_by_global_array_init(max_groups);
-}
-
-static inline void group_by_per_thread_array_fin()
-{
-    group_by_global_array_fin();
-}
+GROUP_BY_GLOBAL_ARRAY_FORWARD_REQUIREMENTS(group_by_per_thread_array);
 
 static inline bool approach_per_thread_array_available(
     int group_bits, int row_count, int grid_dim, int block_dim,

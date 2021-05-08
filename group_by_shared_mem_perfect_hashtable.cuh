@@ -192,10 +192,22 @@ static inline void build_perfect_hashtable(
     // we failed to build a perfect hashtable :( [should be very unlikely]
     RELASE_ASSERT(false);
 }
-
-static inline void group_by_shared_mem_perfect_hashtable_init(size_t max_groups)
+static inline void group_by_shared_mem_perfect_hashtable_get_mem_requirements(
+    size_t max_groups, size_t max_rows, size_t* zeroed, size_t* uninitialized)
 {
-    group_by_hashtable_init(max_groups);
+    // since constructing the table is so expensive we don't want to do it each
+    // run, so we have to preserve the memory -> don't reuse it for other
+    // approaches
+    group_by_hashtable_get_mem_requirements(
+        max_groups, max_rows, zeroed, uninitialized);
+}
+
+static inline void group_by_shared_mem_perfect_hashtable_init(
+    size_t max_groups, size_t max_rows, void* zeroed_mem,
+    void* uninitialized_mem)
+{
+    group_by_hashtable_init(
+        max_groups, max_rows, zeroed_mem, uninitialized_mem);
     max_groups = ceil_to_pow_two(max_groups);
     int group_bits = log2(max_groups);
     if (group_bits > SHARED_MEM_PHT_MAX_GROUP_BITS) {

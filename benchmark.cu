@@ -12,7 +12,7 @@
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
 // set to false to reduce data size for debugging
-#define BIG_DATA true
+#define BIG_DATA false
 // use small group values to ease debugging
 #define SMALL_GROUP_VALS true
 // enforce this assumption so we can use the insert_by family of approaches
@@ -33,8 +33,8 @@
 
 #define ENABLE_APPROACH_HASHTABLE true
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
-#define ENABLE_APPROACH_WARP_CMP false
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
 #define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
@@ -48,7 +48,7 @@
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
 #define ENABLE_BLOCK_CMP_OLD false
 #define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE false
-#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC false
+#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC true
 
 #if ENABLE_APPROACH_HASHTABLE
 #    include "group_by_hashtable.cuh"
@@ -97,7 +97,7 @@
 #if BIG_DATA
 #    define ITERATION_COUNT 5
 #else
-#    define ITERATION_COUNT 2
+#    define ITERATION_COUNT 1
 #endif
 #if BIG_DATA
 #    define BENCHMARK_STREAMS_MAX 8
@@ -116,9 +116,9 @@ const size_t benchmark_row_count_variants[] = {
 #else
 #    define BENCHMARK_ROWS_BITS_MAX 26
 #    define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
-const size_t benchmark_row_count_variants[] = {
-    32, 128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
-// const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
+// const size_t benchmark_row_count_variants[] = {
+//    32, 128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
+const size_t benchmark_row_count_variants[] = {BENCHMARK_ROWS_MAX};
 #endif
 
 #if BIG_DATA
@@ -134,11 +134,7 @@ const int benchmark_gpu_grid_dim_variants[] = {0,   32,   64,   128,  256,
 const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 #endif
 
-#if BIG_DATA
-#    define BENCHMARK_GROUP_BITS_MAX BENCHMARK_ROWS_BITS_MAX
-#else
-#    define BENCHMARK_GROUP_BITS_MAX 26
-#endif
+#define BENCHMARK_GROUP_BITS_MAX BENCHMARK_ROWS_BITS_MAX
 
 #if SMALL_GROUP_VALS
 #    define BENCHMARK_GROUP_VALS_MIN 0
@@ -171,10 +167,10 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 int OMP_THREAD_COUNT = 0;
 
 struct bench_data {
-    union { // anonymous unions to disable RAII
-        std::unordered_map<uint64_t, uint64_t>
-            expected_output[BENCHMARK_ROW_COUNT_VARIANT_COUNT];
-    };
+    std::unordered_map<uint64_t, uint64_t>
+        expected_output[BENCHMARK_ROW_COUNT_VARIANT_COUNT];
+
+    // anonymous unions to disable RAII
     union {
         std::ofstream output_csv;
     };
@@ -183,6 +179,9 @@ struct bench_data {
 
     db_table input_cpu;
     db_table output_cpu;
+
+    void* dev_mem_zeroed;
+    void* dev_mem_uninitialized;
 
     cudaStream_t streams[BENCHMARK_STREAMS_MAX];
     cudaEvent_t events[BENCHMARK_STREAMS_MAX];
@@ -197,6 +196,11 @@ struct bench_data {
     std::uniform_int_distribution<uint64_t> aggregates_dist;
 
     gpu_data data_gpu;
+
+    std::vector<void (*)(size_t, size_t, size_t*, size_t*)>
+        mem_requirements_checkers;
+    std::vector<void (*)(size_t, size_t, void*, void*)> initializers;
+    std::vector<void (*)()> finalizers;
 
     bench_data()
     {
@@ -233,17 +237,21 @@ void free_db_table_cpu(db_table* t)
     free(t->aggregate_col);
 }
 
+#define BENCH_DATA_ADD_SETUP_FUNCS(bd, approach_name)                          \
+    do {                                                                       \
+        (bd)->initializers.push_back(approach_name##_init);                    \
+        (bd)->finalizers.push_back(approach_name##_fin);                       \
+        (bd)->mem_requirements_checkers.push_back(                             \
+            approach_name##_get_mem_requirements);                             \
+    } while (0)
+
 void alloc_bench_data(bench_data* bd)
 {
     int dc;
     cudaGetDeviceCount(&dc);
-    // RELASE_ASSERT(dc == 1);
+    RELASE_ASSERT(dc >= 1);
+    cudaSetDevice(0);
     cudaGetDeviceProperties(&bd->device_properties, 0);
-
-    for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
-        RELASE_ASSERT((new (&bd->expected_output[rcv])
-                           std::unordered_map<uint64_t, uint64_t>()));
-    }
 
 #if DONT_WANT_PINNED_MEM
     alloc_db_table_cpu(&bd->input_cpu, BENCHMARK_ROWS_MAX);
@@ -261,79 +269,72 @@ void alloc_bench_data(bench_data* bd)
     CUDA_TRY(cudaEventCreate(&bd->start_event));
     CUDA_TRY(cudaEventCreate(&bd->end_event));
 
-    gpu_data_alloc(&bd->data_gpu, BENCHMARK_ROWS_MAX, BENCHMARK_GROUPS_MAX);
+    gpu_data_alloc(&bd->data_gpu, BENCHMARK_GROUPS_MAX, BENCHMARK_ROWS_MAX);
 
 #if ENABLE_APPROACH_HASHTABLE
-    group_by_hashtable_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_hashtable);
 #endif
 #if ENABLE_APPROACH_WARP_CMP
-    group_by_warp_cmp_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_warp_cmp);
 #endif
 #if ENABLE_APPROACH_BLOCK_CMP
-    group_by_block_cmp_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_block_cmp);
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
-    group_by_shared_mem_hashtable_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_shared_mem_hashtable);
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
-    group_by_shared_mem_perfect_hashtable_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_shared_mem_perfect_hashtable);
 #endif
 #if ENABLE_APPROACH_PER_THREAD_HASHTABLE
-    group_by_per_thread_hashtable_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_per_thread_hashtable);
 #endif
 #if ENABLE_APPROACH_CUB_RADIX_SORT
-    group_by_cub_radix_sort_init(BENCHMARK_ROWS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_cub_radix_sort);
 #endif
 #if ENABLE_APPROACH_THROUGHPUT_TEST
-    throughput_test_init();
+    // no setup needed for this one
 #endif
 #if ENABLE_APPROACH_GLOBAL_ARRAY
-    group_by_global_array_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_global_array);
 #endif
 #if ENABLE_APPROACH_SHARED_MEM_ARRAY
-    group_by_shared_mem_array_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_shared_mem_array);
 #endif
 #if ENABLE_APPROACH_PER_THREAD_ARRAY
-    group_by_per_thread_array_init(BENCHMARK_GROUPS_MAX);
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_per_thread_array);
 #endif
+    size_t zeroed = 0;
+    size_t uninitialized = 0;
+
+    for (auto mem_req_fn : bd->mem_requirements_checkers) {
+        size_t ap_zeroed, ap_uninitialized;
+        mem_req_fn(
+            BENCHMARK_GROUPS_MAX, BENCHMARK_ROWS_MAX, &ap_zeroed,
+            &ap_uninitialized);
+        zeroed = std::max(zeroed, ap_zeroed);
+        uninitialized = std::max(uninitialized, ap_uninitialized);
+    }
+
+    CUDA_TRY(cudaMalloc(&bd->dev_mem_zeroed, zeroed));
+    CUDA_TRY(cudaMemset(bd->dev_mem_zeroed, 0, zeroed));
+    CUDA_TRY(cudaMalloc(&bd->dev_mem_uninitialized, uninitialized));
+
+    for (auto init_fn : bd->initializers) {
+        init_fn(
+            BENCHMARK_GROUPS_MAX, BENCHMARK_ROWS_MAX, bd->dev_mem_zeroed,
+            bd->dev_mem_uninitialized);
+    }
 }
 
 void free_bench_data(bench_data* bd)
 {
-#if ENABLE_APPROACH_PER_THREAD_ARRAY
-    group_by_per_thread_array_fin();
-#endif
-#if ENABLE_APPROACH_SHARED_MEM_ARRAY
-    group_by_shared_mem_array_fin();
-#endif
-#if ENABLE_APPROACH_GLOBAL_ARRAY
-    group_by_global_array_fin();
-#endif
-#if ENABLE_APPROACH_THROUGHPUT_TEST
-    throughput_test_fin();
-#endif
-#if ENABLE_APPROACH_CUB_RADIX_SORT
-    group_by_cub_radix_sort_fin();
-#endif
-#if ENABLE_APPROACH_PER_THREAD_HASHTABLE
-    group_by_per_thread_hashtable_fin();
-#endif
-#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
-    group_by_shared_mem_perfect_hashtable_fin();
-#endif
-#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
-    group_by_shared_mem_hashtable_fin();
-#endif
-#if ENABLE_APPROACH_BLOCK_CMP
-    group_by_block_cmp_fin();
-#endif
-#if ENABLE_APPROACH_WARP_CMP
-    group_by_warp_cmp_fin();
-#endif
-#if ENABLE_APPROACH_HASHTABLE
-    group_by_hashtable_fin();
-#endif
-
+    for (auto fin_it = bd->finalizers.rbegin(); fin_it != bd->finalizers.rend();
+         ++fin_it) {
+        (*fin_it)();
+    }
+    CUDA_TRY(cudaFree(bd->dev_mem_uninitialized));
+    CUDA_TRY(cudaFree(bd->dev_mem_zeroed));
     gpu_data_free(&bd->data_gpu);
 
     CUDA_TRY(cudaEventDestroy(bd->end_event));
@@ -350,10 +351,6 @@ void free_bench_data(bench_data* bd)
     free_pinned_db_table_cpu(&bd->output_cpu);
     free_pinned_db_table_cpu(&bd->input_cpu);
 #endif
-
-    for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
-        bd->expected_output[rcv].~unordered_map();
-    }
 }
 
 template <size_t GENERATOR_STRIDE>

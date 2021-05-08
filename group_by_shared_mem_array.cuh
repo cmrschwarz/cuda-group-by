@@ -7,15 +7,7 @@
 #define SHARED_MEM_ARR_MAX_GROUP_BITS                                          \
     (CUDA_SHARED_MEM_BITS_PER_BLOCK - SHARED_MEM_ARR_ENTRY_BITS)
 
-static inline void group_by_shared_mem_array_init(size_t max_groups)
-{
-    group_by_global_array_init(max_groups);
-}
-
-static inline void group_by_shared_mem_array_fin()
-{
-    group_by_global_array_fin();
-}
+GROUP_BY_GLOBAL_ARRAY_FORWARD_REQUIREMENTS(group_by_shared_mem_array);
 
 static inline bool approach_shared_mem_array_available(
     int group_bits, int row_count, int grid_dim, int block_dim,
