@@ -37,7 +37,7 @@
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
 #define ENABLE_APPROACH_WARP_CMP true
-#define ENABLE_APPROACH_BLOCK_CMP true
+#define ENABLE_APPROACH_BLOCK_CMP false
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
@@ -46,11 +46,15 @@
 #define ENABLE_APPROACH_SHARED_MEM_ARRAY true
 #define ENABLE_APPROACH_PER_THREAD_ARRAY true
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
-#define ENABLE_BLOCK_CMP_OLD true
-#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE true
-#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC true
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
+#define ENABLE_BLOCK_CMP_OLD false
+#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE false
+#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC false
+#define ENABLE_SHARED_MEM_ARRAY_NON_OPTIMISTIC false
+#define ENABLE_SHARED_MEM_HASHTABLE_OPTIMISTIC false
+#define ENABLE_PER_THREAD_ARRAY_NON_BANK_OPTIMIZED false
+#define ENABLE_PER_THREAD_HASHTABLE_NON_BANK_OPTIMIZED false
 
 #if ENABLE_APPROACH_HASHTABLE
 #    include "group_by_hashtable.cuh"
@@ -97,9 +101,9 @@
 #endif
 
 #if BIG_DATA
-#    define ITERATION_COUNT 5
+#    define ITERATION_COUNT 4
 #else
-#    define ITERATION_COUNT 1
+#    define ITERATION_COUNT 3
 #endif
 #if BIG_DATA
 #    define BENCHMARK_STREAMS_MAX 8
@@ -396,10 +400,12 @@ template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
         approach_shared_mem_hashtable_available,
         group_by_shared_mem_hashtable<GROUP_BIT_COUNT, false>,
         "shared_mem_hashtable");
+#    if ENABLE_SHARED_MEM_HASHTABLE_OPTIMISTIC
     bd->approaches.emplace_back(
         approach_shared_mem_hashtable_available,
         group_by_shared_mem_hashtable<GROUP_BIT_COUNT, true>,
         "shared_mem_hashtable_optimistic");
+#    endif
 #endif
 
 #if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
@@ -410,10 +416,12 @@ template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
 #endif
 
 #if ENABLE_APPROACH_PER_THREAD_HASHTABLE
+#    if ENABLE_PER_THREAD_HASHTABLE_NON_BANK_OPTIMIZED
     bd->approaches.emplace_back(
         approach_per_thread_hashtable_available,
         group_by_per_thread_hashtable<GROUP_BIT_COUNT, false>,
         "per_thread_hashtable");
+#    endif
     bd->approaches.emplace_back(
         approach_per_thread_hashtable_available,
         group_by_per_thread_hashtable<GROUP_BIT_COUNT, true>,
@@ -457,9 +465,11 @@ template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
 #endif
 
 #if ENABLE_APPROACH_SHARED_MEM_ARRAY
+#    if ENABLE_SHARED_MEM_ARRAY_NON_OPTIMISTIC
     bd->approaches.emplace_back(
         approach_shared_mem_array_available,
         group_by_shared_mem_array<GROUP_BIT_COUNT, false>, "shared_mem_array");
+#    endif
     bd->approaches.emplace_back(
         approach_shared_mem_array_available,
         group_by_shared_mem_array<GROUP_BIT_COUNT, true>,
@@ -467,9 +477,11 @@ template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
 #endif
 
 #if ENABLE_APPROACH_PER_THREAD_ARRAY
+#    if ENABLE_PER_THREAD_ARRAY_NON_BANK_OPTIMIZED
     bd->approaches.emplace_back(
         approach_per_thread_array_available,
         group_by_per_thread_array<GROUP_BIT_COUNT, false>, "per_thread_array");
+#    endif
     bd->approaches.emplace_back(
         approach_per_thread_array_available,
         group_by_per_thread_array<GROUP_BIT_COUNT, true>,
