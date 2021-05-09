@@ -14,7 +14,7 @@ struct per_thread_ht_entry {
 GROUP_BY_HASHTABLE_FORWARD_REQUIREMENTS(group_by_per_thread_hashtable)
 
 static inline bool approach_per_thread_hashtable_available(
-    int group_bits, int row_count, int grid_dim, int block_dim,
+    int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)
 {
     if (!grid_dim || !block_dim) return false;

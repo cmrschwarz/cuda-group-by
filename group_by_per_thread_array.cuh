@@ -11,7 +11,7 @@
 GROUP_BY_GLOBAL_ARRAY_FORWARD_REQUIREMENTS(group_by_per_thread_array);
 
 static inline bool approach_per_thread_array_available(
-    int group_bits, int row_count, int grid_dim, int block_dim,
+    int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)
 {
     if (!grid_dim || !block_dim) return false;

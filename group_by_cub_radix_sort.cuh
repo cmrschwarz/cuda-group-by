@@ -61,7 +61,7 @@ void group_by_cub_radix_sort_fin()
 }
 
 static inline bool approach_cub_radix_sort_available(
-    int group_bits, int row_count, int grid_dim, int block_dim,
+    int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)
 {
     return grid_dim == 0 && block_dim == 0 && stream_count == 0;

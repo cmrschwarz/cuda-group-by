@@ -14,7 +14,7 @@
 GROUP_BY_HASHTABLE_FORWARD_REQUIREMENTS(group_by_warp_cmp)
 
 static inline bool approach_warp_cmp_available(
-    int group_bits, int row_count, int grid_dim, int block_dim,
+    int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)
 {
     const size_t group_count = (1 << group_bits);

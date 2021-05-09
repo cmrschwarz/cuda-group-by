@@ -57,6 +57,14 @@ static inline void group_by_global_array_fin()
     global_array = NULL;
 }
 
+static inline bool approach_global_array_available(
+    int group_bits, size_t row_count, int grid_dim, int block_dim,
+    int stream_count)
+{
+    if (!grid_dim || !block_dim) return false;
+    return true;
+}
+
 #define GROUP_BY_GLOBAL_ARRAY_FORWARD_REQUIREMENTS(approach_name)              \
     static inline void approach_name##_get_mem_requirements(                   \
         size_t max_groups, size_t max_rows, size_t* zeroed,                    \
@@ -136,14 +144,6 @@ __global__ void kernel_write_out_global_array(
         occurance_array[i] = false;
         array[i] = 0;
     }
-}
-
-static inline bool approach_global_array_available(
-    int group_bits, int row_count, int grid_dim, int block_dim,
-    int stream_count)
-{
-    if (!grid_dim || !block_dim) return false;
-    return true;
 }
 
 struct cub_group_iterator {

@@ -37,7 +37,7 @@
 #define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
 #define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
 #define ENABLE_APPROACH_WARP_CMP true
-#define ENABLE_APPROACH_BLOCK_CMP false
+#define ENABLE_APPROACH_BLOCK_CMP true
 #define ENABLE_APPROACH_CUB_RADIX_SORT true
 #define ENABLE_APPROACH_THROUGHPUT_TEST true
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
@@ -46,10 +46,10 @@
 #define ENABLE_APPROACH_SHARED_MEM_ARRAY true
 #define ENABLE_APPROACH_PER_THREAD_ARRAY true
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
-#define ENABLE_BLOCK_CMP_OLD false
-#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE false
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
+#define ENABLE_BLOCK_CMP_OLD true
+#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE true
 #define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC true
 
 #if ENABLE_APPROACH_HASHTABLE
@@ -168,6 +168,24 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
 
 int OMP_THREAD_COUNT = 0;
 
+struct approach {
+    typedef bool (*approach_applicable_func)(int, size_t, int, int, int);
+    typedef void (*approach_run_func)(
+        gpu_data*, int, int, int, cudaStream_t*, cudaEvent_t*, cudaEvent_t,
+        cudaEvent_t);
+    approach_applicable_func applicable_func;
+    approach_run_func run_func;
+    const char* name;
+    bool no_validate;
+    approach(
+        approach_applicable_func aaf, approach_run_func arf, const char* name,
+        bool no_validate = false)
+        : applicable_func(aaf), run_func(arf), name(name),
+          no_validate(no_validate)
+    {
+    }
+};
+
 struct bench_data {
     std::unordered_map<uint64_t, uint64_t>
         expected_output[BENCHMARK_ROW_COUNT_VARIANT_COUNT];
@@ -203,7 +221,7 @@ struct bench_data {
         mem_requirements_checkers;
     std::vector<void (*)(size_t, size_t, void*, void*)> initializers;
     std::vector<void (*)()> finalizers;
-
+    std::vector<approach> approaches;
     bench_data()
     {
     }
@@ -306,6 +324,7 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_PER_THREAD_ARRAY
     BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_per_thread_array);
 #endif
+
     size_t zeroed = 0;
     size_t uninitialized = 0;
 
@@ -327,6 +346,135 @@ void alloc_bench_data(bench_data* bd)
             BENCHMARK_GROUPS_MAX, BENCHMARK_ROWS_MAX, bd->dev_mem_zeroed,
             bd->dev_mem_uninitialized);
     }
+}
+
+template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
+{
+    bd->approaches.clear();
+#if ENABLE_APPROACH_HASHTABLE
+    bd->approaches.emplace_back(
+        &approach_hashtable_available,
+        &group_by_hashtable<GROUP_BIT_COUNT, false>, "hashtable");
+#    if ENABLE_HASHTABLE_EAGER_OUT_IDX
+    bd->approaches.emplace_back(
+        approach_hashtable_available, group_by_hashtable<GROUP_BIT_COUNT, true>,
+        "hashtable_eager_out_idx");
+#    endif
+#endif
+
+#if ENABLE_APPROACH_WARP_CMP
+    bd->approaches.emplace_back(
+        approach_warp_cmp_available, group_by_warp_cmp<GROUP_BIT_COUNT>,
+        "warp_cmp");
+#endif
+
+#if ENABLE_APPROACH_BLOCK_CMP
+    bd->approaches.emplace_back(
+        approach_block_cmp_available,
+        group_by_block_cmp<GROUP_BIT_COUNT, false, false>, "block_cmp");
+#    if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
+    bd->approaches.emplace_back(
+        approach_block_cmp_available,
+        group_by_block_cmp<GROUP_BIT_COUNT, true, false>,
+        "block_cmp_naive_writeout");
+#    endif
+#    if ENABLE_BLOCK_CMP_OLD
+    bd->approaches.emplace_back(
+        approach_block_cmp_available,
+        group_by_block_cmp<GROUP_BIT_COUNT, false, true>, "block_cmp_old");
+#        if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
+    bd->approaches.emplace_back(
+        approach_block_cmp_available,
+        group_by_block_cmp<GROUP_BIT_COUNT, true, true>,
+        "block_cmp_old_naive_writeout");
+#        endif
+#    endif
+#endif
+
+#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
+    bd->approaches.emplace_back(
+        approach_shared_mem_hashtable_available,
+        group_by_shared_mem_hashtable<GROUP_BIT_COUNT, false>,
+        "shared_mem_hashtable");
+    bd->approaches.emplace_back(
+        approach_shared_mem_hashtable_available,
+        group_by_shared_mem_hashtable<GROUP_BIT_COUNT, true>,
+        "shared_mem_hashtable_optimistic");
+#endif
+
+#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
+    bd->approaches.emplace_back(
+        approach_shared_mem_perfect_hashtable_available,
+        group_by_shared_mem_perfect_hashtable<GROUP_BIT_COUNT>,
+        "shared_mem_perfect_hashtable");
+#endif
+
+#if ENABLE_APPROACH_PER_THREAD_HASHTABLE
+    bd->approaches.emplace_back(
+        approach_per_thread_hashtable_available,
+        group_by_per_thread_hashtable<GROUP_BIT_COUNT, false>,
+        "per_thread_hashtable");
+    bd->approaches.emplace_back(
+        approach_per_thread_hashtable_available,
+        group_by_per_thread_hashtable<GROUP_BIT_COUNT, true>,
+        "per_thread_hashtable_bank_optimized");
+#endif
+
+#if ENABLE_APPROACH_CUB_RADIX_SORT
+    bd->approaches.emplace_back(
+        approach_cub_radix_sort_available,
+        group_by_cub_radix_sort<GROUP_BIT_COUNT>, "throughput_test");
+#endif
+
+#if ENABLE_APPROACH_THROUGHPUT_TEST
+    bd->approaches.emplace_back(
+        approach_throughput_test_available, throughput_test<GROUP_BIT_COUNT>,
+        "throughput_test", true);
+#endif
+
+#if ENABLE_APPROACH_GLOBAL_ARRAY
+#    if ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE
+#        if ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC
+    bd->approaches.emplace_back(
+        approach_global_array_available,
+        group_by_global_array<GROUP_BIT_COUNT, false, false>, "global_array");
+#        endif
+    bd->approaches.emplace_back(
+        approach_global_array_available,
+        group_by_global_array<GROUP_BIT_COUNT, true, false>,
+        "global_array_optimistic");
+#    endif
+#    if ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC
+    bd->approaches.emplace_back(
+        approach_global_array_available,
+        group_by_global_array<GROUP_BIT_COUNT, false, true>,
+        "global_array_compresstore");
+#    endif
+    bd->approaches.emplace_back(
+        approach_global_array_available,
+        group_by_global_array<GROUP_BIT_COUNT, true, true>,
+        "global_array_optimistic_compresstore");
+#endif
+
+#if ENABLE_APPROACH_SHARED_MEM_ARRAY
+    bd->approaches.emplace_back(
+        approach_shared_mem_array_available,
+        group_by_shared_mem_array<GROUP_BIT_COUNT, false>, "shared_mem_array");
+    bd->approaches.emplace_back(
+        approach_shared_mem_array_available,
+        group_by_shared_mem_array<GROUP_BIT_COUNT, true>,
+        "shared_mem_array_optimistic");
+#endif
+
+#if ENABLE_APPROACH_PER_THREAD_ARRAY
+    bd->approaches.emplace_back(
+        approach_per_thread_array_available,
+        group_by_per_thread_array<GROUP_BIT_COUNT, false>, "per_thread_array");
+    bd->approaches.emplace_back(
+        approach_per_thread_array_available,
+        group_by_per_thread_array<GROUP_BIT_COUNT, true>,
+        "per_thread_array_bank_optimized");
+#endif
 }
 
 void free_bench_data(bench_data* bd)
@@ -819,7 +967,7 @@ bool validate(bench_data* bd, int row_count_variant)
 void record_time_and_validate(
     bench_data* bd, int group_bit_count, int row_count_variant, int grid_dim,
     int block_dim, int stream_count, int iteration, const char* approach_name,
-    bool no_validate = false)
+    bool no_validate)
 {
     CUDA_TRY(cudaEventSynchronize(bd->end_event));
     CUDA_TRY(cudaDeviceSynchronize());
@@ -843,409 +991,11 @@ void record_time_and_validate(
 }
 
 template <int GROUP_BIT_COUNT>
-void run_approach_hashtable(
-    bench_data* bd, bool eager, int row_count_variant, size_t row_count,
-    int grid_dim, int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_HASHTABLE
-
-    if (!approach_hashtable_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-
-#    if ENABLE_HASHTABLE_EAGER_OUT_IDX
-    if (eager) {
-        group_by_hashtable<GROUP_BIT_COUNT, true>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "hashtable_eager_out_idx");
-    }
-#    endif
-    if (!eager) {
-        group_by_hashtable<GROUP_BIT_COUNT, false>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "hashtable");
-    }
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-void run_approach_warp_cmp(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_WARP_CMP
-    if (!approach_warp_cmp_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_warp_cmp<GROUP_BIT_COUNT>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, "warp_cmp");
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-void run_approach_block_cmp(
-    bench_data* bd, bool naive, bool old, int row_count_variant,
-    size_t row_count, int grid_dim, int block_dim, int stream_count,
-    int iteration)
-{
-#if ENABLE_APPROACH_BLOCK_CMP
-    if (!approach_block_cmp_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    if (!naive && !old) {
-        group_by_block_cmp<GROUP_BIT_COUNT, false, false>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "block_cmp");
-    }
-
-#    if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
-    if (naive && !old) {
-        group_by_block_cmp<GROUP_BIT_COUNT, true, false>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "block_cmp_naive_writeout");
-    }
-#    endif
-
-#    if ENABLE_BLOCK_CMP_OLD
-    if (!naive && old) {
-        group_by_block_cmp<GROUP_BIT_COUNT, false, true>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "block_cmp_old");
-    }
-#        if ENABLE_BLOCK_CMP_NAIVE_WRITEOUT
-    if (naive && old) {
-        group_by_block_cmp<GROUP_BIT_COUNT, true, true>(
-            &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-            bd->events, bd->start_event, bd->end_event);
-        record_time_and_validate(
-            bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-            stream_count, iteration, "block_cmp_old_naive_writeout");
-    }
-#        endif
-#    endif
-#endif
-}
-
-template <int GROUP_BIT_COUNT, bool OPTIMISTIC>
-void run_approach_shared_mem_hashtable(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_SHARED_MEM_HASHTABLE
-    if (!approach_shared_mem_hashtable_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_shared_mem_hashtable<GROUP_BIT_COUNT, OPTIMISTIC>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration,
-        OPTIMISTIC ? "shared_mem_hashtable_optimistic"
-                   : "shared_mem_hashtable");
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-void run_approach_shared_mem_perfect_hashtable(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE
-    if (!approach_shared_mem_perfect_hashtable_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-
-    group_by_shared_mem_perfect_hashtable<GROUP_BIT_COUNT>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, "shared_mem_perfect_hashtable");
-#endif
-}
-template <int GROUP_BIT_COUNT, bool BANK_OPTIMIZED>
-void run_approach_per_thread_hashtable(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_PER_THREAD_HASHTABLE
-    if (!approach_per_thread_hashtable_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_per_thread_hashtable<GROUP_BIT_COUNT, BANK_OPTIMIZED>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration,
-        BANK_OPTIMIZED ? "per_thread_hashtable_bank_optimized"
-                       : "per_thread_hashtable");
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-void run_approach_cub_radix_sort(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_CUB_RADIX_SORT
-    if (!approach_cub_radix_sort_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_cub_radix_sort<GROUP_BIT_COUNT>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, "cub_radix_sort");
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-void run_approach_throughput_test(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_THROUGHPUT_TEST
-    if (!approach_throughput_test_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    throughput_test<GROUP_BIT_COUNT>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, "throughput_test", true);
-#endif
-}
-
-template <int GROUP_BIT_COUNT, bool OPTIMISTIC, bool COMPRESSTORE>
-void run_approach_global_array(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_GLOBAL_ARRAY
-    // use runtime variables to prevent dead code warnings
-    bool optimistic = OPTIMISTIC;
-    bool compresstore = COMPRESSTORE;
-    if (!ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE && !compresstore) return;
-    if (!ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC && !optimistic) return;
-    if (!approach_global_array_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-
-    group_by_global_array<GROUP_BIT_COUNT, OPTIMISTIC, COMPRESSTORE>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    const char* ap_name;
-    if (OPTIMISTIC && COMPRESSTORE) {
-        ap_name = "global_array_optimistic_compresstore";
-    }
-    if (OPTIMISTIC && !COMPRESSTORE) ap_name = "global_array_optimistic";
-    if (!OPTIMISTIC && COMPRESSTORE) ap_name = "global_array_compresstore";
-    if (!OPTIMISTIC && !COMPRESSTORE) ap_name = "global_array";
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration, ap_name);
-#endif
-}
-
-template <int GROUP_BIT_COUNT, bool OPTIMISTIC>
-void run_approach_shared_mem_array(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_SHARED_MEM_ARRAY
-    if (!approach_shared_mem_array_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_shared_mem_array<GROUP_BIT_COUNT, OPTIMISTIC>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration,
-        OPTIMISTIC ? "shared_mem_array_optimistic" : "shared_mem_array");
-#endif
-}
-
-template <int GROUP_BIT_COUNT, bool BANK_OPTIMIZED>
-void run_approach_per_thread_array(
-    bench_data* bd, int row_count_variant, size_t row_count, int grid_dim,
-    int block_dim, int stream_count, int iteration)
-{
-#if ENABLE_APPROACH_PER_THREAD_ARRAY
-    if (!approach_per_thread_array_available(
-            GROUP_BIT_COUNT, row_count, grid_dim, block_dim, stream_count)) {
-        return;
-    }
-    group_by_per_thread_array<GROUP_BIT_COUNT, BANK_OPTIMIZED>(
-        &bd->data_gpu, grid_dim, block_dim, stream_count, bd->streams,
-        bd->events, bd->start_event, bd->end_event);
-    record_time_and_validate(
-        bd, GROUP_BIT_COUNT, row_count_variant, grid_dim, block_dim,
-        stream_count, iteration,
-        BANK_OPTIMIZED ? "per_thread_array_bank_optimized"
-                       : "per_thread_array");
-#endif
-}
-
-template <int GROUP_BIT_COUNT>
-int run_approach(
-    bench_data* bd, int approach_id, int row_count_variant, size_t row_count,
-    int grid_dim, int block_dim, int stream_count, int iteration)
-{
-    switch (approach_id) {
-        case 0: {
-            run_approach_hashtable<GROUP_BIT_COUNT>(
-                bd, false, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 1: {
-            run_approach_hashtable<GROUP_BIT_COUNT>(
-                bd, true, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 2: {
-            run_approach_shared_mem_hashtable<GROUP_BIT_COUNT, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 3: {
-            run_approach_shared_mem_hashtable<GROUP_BIT_COUNT, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 4: {
-            run_approach_per_thread_hashtable<GROUP_BIT_COUNT, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 5: {
-            run_approach_per_thread_hashtable<GROUP_BIT_COUNT, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 6: {
-            run_approach_warp_cmp<GROUP_BIT_COUNT>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 7: {
-            run_approach_block_cmp<GROUP_BIT_COUNT>(
-                bd, false, false, row_count_variant, row_count, grid_dim,
-                block_dim, stream_count, iteration);
-        } break;
-        case 8: {
-            run_approach_block_cmp<GROUP_BIT_COUNT>(
-                bd, false, true, row_count_variant, row_count, grid_dim,
-                block_dim, stream_count, iteration);
-        } break;
-        case 9: {
-            run_approach_block_cmp<GROUP_BIT_COUNT>(
-                bd, true, false, row_count_variant, row_count, grid_dim,
-                block_dim, stream_count, iteration);
-        } break;
-        case 10: {
-            run_approach_block_cmp<GROUP_BIT_COUNT>(
-                bd, true, true, row_count_variant, row_count, grid_dim,
-                block_dim, stream_count, iteration);
-        } break;
-        case 11: {
-            run_approach_cub_radix_sort<GROUP_BIT_COUNT>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 12: {
-            run_approach_throughput_test<GROUP_BIT_COUNT>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 13: {
-            run_approach_shared_mem_perfect_hashtable<GROUP_BIT_COUNT>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 14: {
-            run_approach_global_array<GROUP_BIT_COUNT, false, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 15: {
-            run_approach_global_array<GROUP_BIT_COUNT, false, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 16: {
-            run_approach_global_array<GROUP_BIT_COUNT, true, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 17: {
-            run_approach_global_array<GROUP_BIT_COUNT, true, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 18: {
-            run_approach_shared_mem_array<GROUP_BIT_COUNT, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 19: {
-            run_approach_shared_mem_array<GROUP_BIT_COUNT, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 20: {
-            run_approach_per_thread_array<GROUP_BIT_COUNT, false>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 21: {
-            run_approach_per_thread_array<GROUP_BIT_COUNT, true>(
-                bd, row_count_variant, row_count, grid_dim, block_dim,
-                stream_count, iteration);
-        } break;
-        case 22: return -1;
-        default: assert(false);
-    }
-    return approach_id + 1;
-}
-template <int GROUP_BIT_COUNT>
 void run_benchmarks_for_group_bit_count(bench_data* bd)
 {
     static_assert(GROUP_BIT_COUNT <= BENCHMARK_GROUP_BITS_MAX);
     setup_bench_data(bd, GROUP_BIT_COUNT);
+    setup_approaches<GROUP_BIT_COUNT>(bd);
     for (int rcv = 0; rcv < BENCHMARK_ROW_COUNT_VARIANT_COUNT; rcv++) {
         size_t row_count = benchmark_row_count_variants[rcv];
         // artificially reduce the row counts
@@ -1258,15 +1008,20 @@ void run_benchmarks_for_group_bit_count(bench_data* bd)
                 for (int scv = 0; scv < BENCHMARK_STREAM_COUNT_VARIANT_COUNT;
                      scv++) {
                     int stream_count = benchmark_stream_count_variants[scv];
-                    int approach_id = 0;
-                    while (approach_id != -1) {
-                        int approach_id_next;
+                    for (auto& ap : bd->approaches) {
                         for (int it = 0; it < ITERATION_COUNT; it++) {
-                            approach_id_next = run_approach<GROUP_BIT_COUNT>(
-                                bd, approach_id, rcv, row_count, grid_dim,
-                                block_dim, stream_count, it);
+                            if (!ap.applicable_func(
+                                    GROUP_BIT_COUNT, row_count, grid_dim,
+                                    block_dim, stream_count))
+                                continue;
+                            ap.run_func(
+                                &bd->data_gpu, grid_dim, block_dim,
+                                stream_count, bd->streams, bd->events,
+                                bd->start_event, bd->end_event);
+                            record_time_and_validate(
+                                bd, GROUP_BIT_COUNT, rcv, grid_dim, block_dim,
+                                stream_count, it, ap.name, ap.no_validate);
                         }
-                        approach_id = approach_id_next;
                     }
                 }
             }
@@ -1280,7 +1035,7 @@ int main()
     OMP_THREAD_COUNT = omp_get_max_threads();
     if (OMP_THREAD_COUNT > OMP_THREAD_LEEWAY) {
         OMP_THREAD_COUNT -= OMP_THREAD_LEEWAY;
-        omp_set_max_threads(OMP_THREAD_COUNT);
+        omp_set_num_threads(OMP_THREAD_COUNT);
     }
 #else
     OMP_THREAD_COUNT = 1;
