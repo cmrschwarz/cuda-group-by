@@ -375,8 +375,6 @@ void group_by_partition_to_sm(
         // if we have only one stream there is no need for waiting events
         if (stream_count > 1) cudaEventRecord(events[stream_count + i], stream);
     }
-    cudaDeviceSynchronize();
-    CUDA_TRY(cudaGetLastError());
     for (int i = 0; i < actual_stream_count; i++) {
         cudaStream_t stream = stream_count ? streams[i] : 0;
         if (stream_count > 1) {
@@ -392,8 +390,6 @@ void group_by_partition_to_sm(
                 gd->output, ptsm_bucket_heads, global_array,
                 global_array_occurance_flags, actual_stream_count, i);
     }
-    cudaDeviceSynchronize();
-    CUDA_TRY(cudaGetLastError());
     group_by_global_array_writeout<MAX_GROUP_BITS>(
         gd, grid_dim, block_dim, stream_count, streams, events, start_event,
         end_event);

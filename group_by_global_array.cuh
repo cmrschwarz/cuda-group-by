@@ -236,10 +236,10 @@ void group_by_global_array_writeout(
         }
     }
     CUDA_TRY(cudaEventRecord(end_event));
-    CUDA_TRY(cudaGetLastError());
     cudaMemcpyFromSymbol(
         &gd->output.row_count, global_array_groups_found, sizeof(size_t), 0,
         cudaMemcpyDeviceToHost);
+    CUDA_TRY(cudaGetLastError());
 }
 
 template <int MAX_GROUP_BITS, bool OPTIMISTIC, bool COMPRESSTORE>
