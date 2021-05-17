@@ -95,7 +95,10 @@ static inline bool approach_partition_to_sm_available(
     int stream_count)
 {
     if (!grid_dim || !block_dim) return false;
-    if (grid_dim * stream_count > PTSM_MAX_STREAMED_GRID_SIZE) return false;
+    if (grid_dim * (stream_count ? stream_count : 1) >
+        PTSM_MAX_STREAMED_GRID_SIZE) {
+        return false;
+    }
     if (group_bits <= PTSM_PARTITION_GROUP_BITS) return false;
     size_t max_group_bits =
         PTSM_PARTITION_GROUP_BITS + PTSM_MAX_PARTITION_COUNT_BITS;

@@ -354,9 +354,12 @@ def grid_dim_block_dim_failiure_heatmap(data, approach, group_count=None, stream
             len(rowcount_vals) * len(unique_col_vals(filtered, BLOCK_DIM_COL))
         ),
     )
-    if len(rowcount_vals) == 1 and len(x_axis_vals) == 1:
+    if len(rowcount_vals) == 1:
         # fix the api not returning an array in this case
-        axes = [[axes]]
+        axes = [axes]
+    if len(x_axis_vals) == 1:
+        for i in range(0, len(axes)):
+            axes[i] = [axes[i]]
 
     for (row_id, rc) in enumerate(rowcount_vals):
         by_row_count = filter_col_val(filtered, ROW_COUNT_COL, rc)
@@ -1032,6 +1035,8 @@ def main():
 
     # filter out failed runs
     data = exclude_col_val(data_raw, VALIDATION_COL, "FAIL")
+    if len(data) != len(data_raw):
+        print(f"ignoring {len(data_raw) - len(data)} failed runs")
 
     # filter out the 0'th iteration, trying reduce standard deviation
     # since this doesn't really help, we don't do it 
