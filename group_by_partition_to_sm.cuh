@@ -36,7 +36,7 @@
 #define PTSM_BUCKET_OVERFILL_BITS CUDA_MAX_BLOCK_SIZE_BITS
 #define PTSM_BUCKET_IDX_BITS (PTSM_BUCKET_CAP_BITS + PTSM_BUCKET_OVERFILL_BITS)
 #define PTSM_MAX_OVERFILL (CUDA_MAX_BLOCK_SIZE_BITS - PTSM_BUCKET_CAP_BITS + 1)
-
+#define PTSM_MAX_STREAMED_GRID_SIZE 1024
 union bucket_entry {
     struct bucket_entry_head {
         union bucket_entry* prev;
@@ -57,8 +57,9 @@ static inline void group_by_partition_to_sm_get_mem_requirements(
 {
     group_by_global_array_get_mem_requirements(
         max_groups, max_rows, zeroed, uninitialized);
-    size_t buckets_cap_max_oversize =
-        CUDA_MAX_BLOCK_SIZE * PTSM_BUCKET_CAP * PTSM_MAX_PARTITION_COUNT;
+    size_t buckets_cap_max_oversize = PTSM_MAX_STREAMED_GRID_SIZE *
+                                      PTSM_MAX_PARTITION_COUNT *
+                                      PTSM_BUCKET_CAP;
     size_t max_buckets_size_total =
         (max_rows + buckets_cap_max_oversize) * sizeof(bucket_entry);
     size_t bucket_ptrs_size = PTSM_MAX_PARTITION_COUNT * sizeof(bucket_entry*);
@@ -93,8 +94,8 @@ static inline bool approach_partition_to_sm_available(
     int group_bits, size_t row_count, int grid_dim, int block_dim,
     int stream_count)
 {
-
     if (!grid_dim || !block_dim) return false;
+    if (grid_dim * stream_count > PTSM_MAX_STREAMED_GRID_SIZE) return false;
     if (group_bits <= PTSM_PARTITION_GROUP_BITS) return false;
     size_t max_group_bits =
         PTSM_PARTITION_GROUP_BITS + PTSM_MAX_PARTITION_COUNT_BITS;

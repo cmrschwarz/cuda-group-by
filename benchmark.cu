@@ -283,7 +283,7 @@ void alloc_bench_data(bench_data* bd)
     int dc;
     cudaGetDeviceCount(&dc);
     RELASE_ASSERT(dc >= 1);
-    cudaSetDevice(0);
+    if (dc > 0) cudaSetDevice(1); // as agreed on
     cudaGetDeviceProperties(&bd->device_properties, 0);
 
 #if DONT_WANT_PINNED_MEM
