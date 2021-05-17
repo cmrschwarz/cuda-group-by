@@ -42,8 +42,8 @@
 #define ENABLE_APPROACH_THROUGHPUT_TEST false
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE false
 
-#define ENABLE_APPROACH_GLOBAL_ARRAY false
-#define ENABLE_APPROACH_SHARED_MEM_ARRAY false
+#define ENABLE_APPROACH_GLOBAL_ARRAY true
+#define ENABLE_APPROACH_SHARED_MEM_ARRAY true
 #define ENABLE_APPROACH_PER_THREAD_ARRAY false
 
 #define ENABLE_APPROACH_PARTITION_TO_SM true
@@ -126,7 +126,7 @@ const size_t benchmark_stream_count_variants[] = {0};
 const size_t benchmark_row_count_variants[] = {
     1024, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
 #else
-#    define BENCHMARK_ROWS_BITS_MAX 26
+#    define BENCHMARK_ROWS_BITS_MAX 25
 #    define BENCHMARK_ROWS_MAX ((size_t)1 << BENCHMARK_ROWS_BITS_MAX)
 // const size_t benchmark_row_count_variants[] = {
 //    32, 128, 1024, 16384, 131072, BENCHMARK_ROWS_MAX / 2, BENCHMARK_ROWS_MAX};
@@ -177,6 +177,9 @@ const int benchmark_gpu_grid_dim_variants[] = {0, 128, 512};
     ((int)ARRAY_SIZE(benchmark_stream_count_variants))
 
 int OMP_THREAD_COUNT = 0;
+#define BENCHMARK_MAX_EVENT_CHAIN_LENGTH 2
+#define BENCHMARK_MAX_EVENTS                                                   \
+    (BENCHMARK_STREAMS_MAX * BENCHMARK_MAX_EVENT_CHAIN_LENGTH)
 
 struct approach {
     typedef bool (*approach_applicable_func)(int, size_t, int, int, int);
@@ -213,8 +216,8 @@ struct bench_data {
     void* dev_mem_zeroed;
     void* dev_mem_uninitialized;
 
-    cudaStream_t streams[BENCHMARK_STREAMS_MAX];
-    cudaEvent_t events[BENCHMARK_STREAMS_MAX];
+    cudaStream_t streams[BENCHMARK_MAX_EVENTS];
+    cudaEvent_t events[BENCHMARK_MAX_EVENTS];
 
     cudaEvent_t start_event;
     cudaEvent_t end_event;
@@ -291,7 +294,7 @@ void alloc_bench_data(bench_data* bd)
     alloc_pinned_db_table_cpu(&bd->output_cpu, BENCHMARK_GROUPS_MAX);
 #endif
 
-    for (int i = 0; i < BENCHMARK_STREAMS_MAX; i++) {
+    for (int i = 0; i < BENCHMARK_MAX_EVENTS; i++) {
         CUDA_TRY(cudaStreamCreate(&bd->streams[i]));
         CUDA_TRY(cudaEventCreate(&bd->events[i]));
     }
@@ -517,7 +520,7 @@ void free_bench_data(bench_data* bd)
     CUDA_TRY(cudaEventDestroy(bd->end_event));
     CUDA_TRY(cudaEventDestroy(bd->start_event));
 
-    for (int i = 0; i < BENCHMARK_STREAMS_MAX; i++) {
+    for (int i = 0; i < BENCHMARK_MAX_EVENTS; i++) {
         CUDA_TRY(cudaEventDestroy(bd->events[i]));
         CUDA_TRY(cudaStreamDestroy(bd->streams[i]));
     }
@@ -1075,26 +1078,24 @@ int main()
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
 
-    /*
     run_benchmarks_for_group_bit_count<1>(&bench_data);
+    run_benchmarks_for_group_bit_count<2>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
+    run_benchmarks_for_group_bit_count<4>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
     run_benchmarks_for_group_bit_count<9>(&bench_data);
     run_benchmarks_for_group_bit_count<11>(&bench_data);
-    */
-    run_benchmarks_for_group_bit_count<15>(&bench_data);
-    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
-#if BIG_DATA
-    run_benchmarks_for_group_bit_count<2>(&bench_data);
-    run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<7>(&bench_data);
-    run_benchmarks_for_group_bit_count<10>(&bench_data);
     run_benchmarks_for_group_bit_count<13>(&bench_data);
+    run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<17>(&bench_data);
     run_benchmarks_for_group_bit_count<18>(&bench_data);
+    run_benchmarks_for_group_bit_count<19>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
-#endif
+    run_benchmarks_for_group_bit_count<22>(&bench_data);
+    run_benchmarks_for_group_bit_count<23>(&bench_data);
+
+    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();

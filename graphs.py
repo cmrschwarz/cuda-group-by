@@ -68,7 +68,8 @@ approach_colors = {
     "shared_mem_array": "black",
     "shared_mem_array_optimistic": "blue",
     "per_thread_array": "magenta",
-    "per_thread_array_bank_optimized": "olive"
+    "per_thread_array_bank_optimized": "olive",
+    "partition_to_sm": "goldenrod",
 }
 approach_markers = {
     "hashtable": "^",
@@ -93,7 +94,8 @@ approach_markers = {
     "shared_mem_array": "H",
     "shared_mem_array_optimistic": "h",
     "per_thread_array": "p",
-    "per_thread_array_bank_optimized": "P"
+    "per_thread_array_bank_optimized": "P",
+    "partition_to_sm": "s",
 }
 
 
