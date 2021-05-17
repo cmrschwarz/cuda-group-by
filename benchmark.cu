@@ -33,18 +33,20 @@
 #    define USE_OPENMP false
 #endif
 
-#define ENABLE_APPROACH_HASHTABLE true
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
-#define ENABLE_APPROACH_WARP_CMP true
+#define ENABLE_APPROACH_HASHTABLE false
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
+#define ENABLE_APPROACH_WARP_CMP false
 #define ENABLE_APPROACH_BLOCK_CMP false
-#define ENABLE_APPROACH_CUB_RADIX_SORT true
-#define ENABLE_APPROACH_THROUGHPUT_TEST true
-#define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
+#define ENABLE_APPROACH_CUB_RADIX_SORT false
+#define ENABLE_APPROACH_THROUGHPUT_TEST false
+#define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE false
 
-#define ENABLE_APPROACH_GLOBAL_ARRAY true
-#define ENABLE_APPROACH_SHARED_MEM_ARRAY true
-#define ENABLE_APPROACH_PER_THREAD_ARRAY true
+#define ENABLE_APPROACH_GLOBAL_ARRAY false
+#define ENABLE_APPROACH_SHARED_MEM_ARRAY false
+#define ENABLE_APPROACH_PER_THREAD_ARRAY false
+
+#define ENABLE_APPROACH_PARTITION_TO_SM true
 
 #define ENABLE_HASHTABLE_EAGER_OUT_IDX false
 #define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
@@ -100,10 +102,14 @@
 #    include "group_by_per_thread_array.cuh"
 #endif
 
+#if ENABLE_APPROACH_PARTITION_TO_SM
+#    include "group_by_partition_to_sm.cuh"
+#endif
+
 #if BIG_DATA
 #    define ITERATION_COUNT 4
 #else
-#    define ITERATION_COUNT 3
+#    define ITERATION_COUNT 1
 #endif
 #if BIG_DATA
 #    define BENCHMARK_STREAMS_MAX 8
@@ -328,6 +334,9 @@ void alloc_bench_data(bench_data* bd)
 #if ENABLE_APPROACH_PER_THREAD_ARRAY
     BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_per_thread_array);
 #endif
+#if ENABLE_APPROACH_PARTITION_TO_SM
+    BENCH_DATA_ADD_SETUP_FUNCS(bd, group_by_partition_to_sm);
+#endif
 
     size_t zeroed = 0;
     size_t uninitialized = 0;
@@ -486,6 +495,12 @@ template <int GROUP_BIT_COUNT> void setup_approaches(bench_data* bd)
         approach_per_thread_array_available,
         group_by_per_thread_array<GROUP_BIT_COUNT, true>,
         "per_thread_array_bank_optimized");
+#endif
+
+#if ENABLE_APPROACH_PARTITION_TO_SM
+    bd->approaches.emplace_back(
+        approach_partition_to_sm_available,
+        group_by_partition_to_sm<GROUP_BIT_COUNT>, "partition_to_sm");
 #endif
 }
 
@@ -1060,11 +1075,13 @@ int main()
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
 
+    /*
     run_benchmarks_for_group_bit_count<1>(&bench_data);
     run_benchmarks_for_group_bit_count<3>(&bench_data);
     run_benchmarks_for_group_bit_count<5>(&bench_data);
     run_benchmarks_for_group_bit_count<9>(&bench_data);
     run_benchmarks_for_group_bit_count<11>(&bench_data);
+    */
     run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 

@@ -12,6 +12,12 @@
 // (even though they are on literally any plattform)
 // this causes e.g. atomicAdd to complain about parameter types
 typedef unsigned long long int cudaUInt64_t;
+#if INTPTR_MAX == INT64_MAX
+typedef unsigned long long int cudaVoidPtr_t;
+#else
+typedef unsigned int cudaVoidPtr_t;
+#endif
+
 #define CUDA_WARP_SIZE 32
 #define CUDA_WARP_SIZE_BITS 5
 #define CUDA_MAX_BLOCK_SIZE 1024
@@ -74,9 +80,14 @@ static inline size_t ceil_to_mult(size_t v, size_t mult)
     return v;
 }
 
-static inline void* ptradd(void* ptr, size_t val)
+__device__ __host__ static inline void* ptradd(void* ptr, size_t val)
 {
     return (void*)(((char*)ptr) + val);
+}
+
+__device__ __host__ static inline size_t ptrsub(void* greater, void* smaller)
+{
+    return ((size_t)greater) - ((size_t)smaller);
 }
 
 static inline int log2(size_t v)
