@@ -3,31 +3,21 @@
 #include "group_by_global_array.cuh"
 
 // uint64 for sm_array has 8 bytes -> take 3 bits off of shared mem bits per
-
 #define PTSM_SM_ARRAY_OVERSIZE_SUFFICIENT                                      \
     (CUDA_SHARED_MEM_PER_BLOCK >=                                              \
-     (1 << (CUDA_SHARED_MEM_BITS_PER_BLOCK - 3)) *                             \
-         (sizeof(uint64_t) + sizeof(bool)))
+     ((CUDA_MAX_BLOCK_SIZE / CUDA_WARP_SIZE) * sizeof(bucket_entry*) +         \
+      (1 << (CUDA_SHARED_MEM_BITS_PER_BLOCK - 3)) *                            \
+          (sizeof(uint64_t) + sizeof(bool))))
 
 #define PTSM_SM_ARRAY_MAX_GROUP_BITS                                           \
     (PTSM_SM_ARRAY_OVERSIZE_SUFFICIENT ? CUDA_SHARED_MEM_BITS_PER_BLOCK - 3    \
                                        : CUDA_SHARED_MEM_BITS_PER_BLOCK - 4)
 
-#define PTSM_PARTITION_GROUP_BITS PTSM_SM_ARRAY_MAX_GROUP_BITS
-#define PTSM_PARTITION_GROUP_COUNT ((size_t)1 << PTSM_SM_ARRAY_MAX_GROUP_BITS)
+#define PTSM_PER_PARTITION_GROUP_BITS PTSM_SM_ARRAY_MAX_GROUP_BITS
+#define PTSM_PER_PARTITION_GROUP_COUNT                                         \
+    ((size_t)1 << PTSM_SM_ARRAY_MAX_GROUP_BITS)
 // uint64 for bucket_pointers 8 bytes -> take 3 bits off of shared mem bits per
-// block problem: we need a pointer plus an int per entry -> not a clean power
-// of two
-#define PTSM_SHARED_MEM_OVERSIZE_SUFFICIENT                                    \
-    (CUDA_SHARED_MEM_PER_BLOCK >=                                              \
-     (1 << (CUDA_SHARED_MEM_BITS_PER_BLOCK - 3)) *                             \
-             (sizeof(bucket_entry*) + sizeof(int)) +                           \
-         (CUDA_MAX_BLOCK_SIZE / CUDA_WARP_SIZE) * sizeof(bucket_entry*))
-
-#define PTSM_MAX_PARTITION_COUNT_BITS                                          \
-    (PTSM_SHARED_MEM_OVERSIZE_SUFFICIENT                                       \
-         ? (CUDA_SHARED_MEM_BITS_PER_BLOCK - 3)                                \
-         : (CUDA_SHARED_MEM_BITS_PER_BLOCK - 4))
+#define PTSM_MAX_PARTITION_COUNT_BITS (CUDA_SHARED_MEM_BITS_PER_BLOCK - 3)
 #define PTSM_MAX_PARTITION_COUNT ((size_t)1 << PTSM_MAX_PARTITION_COUNT_BITS)
 // 128 elements per bucket. we don't want to go too big to keep the potential
 // oversize down, but we don't want to go too small to keep decent cache usage
@@ -36,7 +26,7 @@
 #define PTSM_BUCKET_OVERFILL_BITS CUDA_MAX_BLOCK_SIZE_BITS
 #define PTSM_BUCKET_IDX_BITS (PTSM_BUCKET_CAP_BITS + PTSM_BUCKET_OVERFILL_BITS)
 #define PTSM_MAX_OVERFILL (CUDA_MAX_BLOCK_SIZE_BITS - PTSM_BUCKET_CAP_BITS + 1)
-#define PTSM_MAX_STREAMED_GRID_SIZE 1024
+#define PTSM_MAX_STREAMED_GRID_SIZE 512
 union bucket_entry {
     struct bucket_entry_head {
         union bucket_entry* prev;
@@ -57,9 +47,13 @@ static inline void group_by_partition_to_sm_get_mem_requirements(
 {
     group_by_global_array_get_mem_requirements(
         max_groups, max_rows, zeroed, uninitialized);
-    size_t buckets_cap_max_oversize = PTSM_MAX_STREAMED_GRID_SIZE *
-                                      PTSM_MAX_PARTITION_COUNT *
-                                      PTSM_BUCKET_CAP;
+    size_t max_group_bits = log2(max_groups);
+    size_t partition_count_max = max_groups / PTSM_PER_PARTITION_GROUP_COUNT;
+    if (partition_count_max > PTSM_MAX_PARTITION_COUNT) {
+        partition_count_max = PTSM_MAX_PARTITION_COUNT;
+    }
+    size_t buckets_cap_max_oversize =
+        PTSM_MAX_STREAMED_GRID_SIZE * partition_count_max * PTSM_BUCKET_CAP;
     size_t max_buckets_size_total =
         (max_rows + buckets_cap_max_oversize) * sizeof(bucket_entry);
     size_t bucket_ptrs_size = PTSM_MAX_PARTITION_COUNT * sizeof(bucket_entry*);
@@ -99,9 +93,9 @@ static inline bool approach_partition_to_sm_available(
         PTSM_MAX_STREAMED_GRID_SIZE) {
         return false;
     }
-    if (group_bits <= PTSM_PARTITION_GROUP_BITS) return false;
+    if (group_bits <= PTSM_PER_PARTITION_GROUP_BITS) return false;
     size_t max_group_bits =
-        PTSM_PARTITION_GROUP_BITS + PTSM_MAX_PARTITION_COUNT_BITS;
+        PTSM_PER_PARTITION_GROUP_BITS + PTSM_MAX_PARTITION_COUNT_BITS;
     if (group_bits > max_group_bits) return false;
     return true;
 }
@@ -112,9 +106,9 @@ __global__ void kernel_partition_to_sm(
     int stream_count, int stream_idx)
 {
     constexpr int PARTITION_COUNT_UNCAPPED =
-        (MAX_GROUP_BITS <= PTSM_PARTITION_GROUP_BITS)
+        (MAX_GROUP_BITS <= PTSM_PER_PARTITION_GROUP_BITS)
             ? 1
-            : 1 << (MAX_GROUP_BITS - PTSM_PARTITION_GROUP_BITS);
+            : 1 << (MAX_GROUP_BITS - PTSM_PER_PARTITION_GROUP_BITS);
     constexpr int PARTITION_COUNT =
         PARTITION_COUNT_UNCAPPED > PTSM_MAX_PARTITION_COUNT
             ? 1
@@ -131,8 +125,9 @@ __global__ void kernel_partition_to_sm(
         bucket_entry* be = (bucket_entry*)atomicAdd(
             (cudaVoidPtr_t*)&ptsm_bucket_mem_pos,
             PTSM_BUCKET_CAP * sizeof(bucket_entry));
-        bucket_pointers[i] =
-            ((uint64_t)ptrsub(be, buckets_mem) << PTSM_BUCKET_IDX_BITS) + 1;
+        uint64_t diff = ptrsub(be, buckets_mem);
+        // assert(diff < ((uint64_t)1 << (64 - PTSM_BUCKET_IDX_BITS)));
+        bucket_pointers[i] = (diff << PTSM_BUCKET_IDX_BITS) + 1;
     }
     __syncthreads();
     // since we have syncthreads" in this loop we have to make sure
@@ -147,7 +142,7 @@ __global__ void kernel_partition_to_sm(
         if (idx < row_count) {
             group = input.group_col[idx];
             aggregate = input.aggregate_col[idx];
-            part_idx = (int)(group >> PTSM_PARTITION_GROUP_BITS);
+            part_idx = (int)(group >> PTSM_PER_PARTITION_GROUP_BITS);
             ptr_idx = atomicAdd((cudaUInt64_t*)&bucket_pointers[part_idx], 1);
             bucket_idx = (int)ptr_idx & BUCKET_MASK;
             bucket = (bucket_entry*)ptradd(
@@ -167,7 +162,6 @@ __global__ void kernel_partition_to_sm(
             }
         }
         __syncthreads();
-        int it = 0;
         while (conflicts) {
             if (bucket_idx == PTSM_BUCKET_CAP) {
                 bucket->head.element_count = PTSM_BUCKET_CAP;
@@ -209,7 +203,6 @@ __global__ void kernel_partition_to_sm(
                     conflicts = true;
                 }
             }
-            it++;
             __syncthreads();
         }
         __syncthreads();
@@ -243,17 +236,17 @@ __global__ void kernel_partitions_into_sm_array(
     // cause ptxas error during compilations by requiring
     // too much shared memory even if these instantiations are never used
     constexpr int PARTITION_COUNT_UNCAPPED =
-        (MAX_GROUP_BITS <= PTSM_PARTITION_GROUP_BITS)
+        (MAX_GROUP_BITS <= PTSM_PER_PARTITION_GROUP_BITS)
             ? 1
-            : 1 << (MAX_GROUP_BITS - PTSM_PARTITION_GROUP_BITS);
+            : 1 << (MAX_GROUP_BITS - PTSM_PER_PARTITION_GROUP_BITS);
     constexpr int PARTITION_COUNT =
         PARTITION_COUNT_UNCAPPED > PTSM_MAX_PARTITION_COUNT
             ? 1
             : PARTITION_COUNT_UNCAPPED;
-    constexpr uint64_t PARITION_MASK = PTSM_PARTITION_GROUP_COUNT - 1;
+    constexpr uint64_t PARITION_MASK = PTSM_PER_PARTITION_GROUP_COUNT - 1;
     constexpr int MAX_WARP_COUNT = CUDA_MAX_BLOCK_SIZE / CUDA_WARP_SIZE;
-    __shared__ uint64_t shared_mem_array[PTSM_PARTITION_GROUP_COUNT];
-    __shared__ bool shared_mem_array_occurance[PTSM_PARTITION_GROUP_COUNT];
+    __shared__ uint64_t shared_mem_array[PTSM_PER_PARTITION_GROUP_COUNT];
+    __shared__ bool shared_mem_array_occurance[PTSM_PER_PARTITION_GROUP_COUNT];
     __shared__ bucket_entry* warp_buckets[MAX_WARP_COUNT];
 
     __shared__ bool bucket_aquired;
@@ -261,10 +254,12 @@ __global__ void kernel_partitions_into_sm_array(
     int warp_id = threadIdx.x / CUDA_WARP_SIZE;
     int warp_offset = threadIdx.x % CUDA_WARP_SIZE;
     bool warp_leader = warp_offset == 0;
-    int partition_stride = PARTITION_COUNT / (gridDim.x * stream_count);
+    int full_grid_width = gridDim.x * stream_count;
+    int partition_stride = PARTITION_COUNT / full_grid_width;
     if (partition_stride == 0) partition_stride = 1;
-    for (int part_id = blockIdx.x % PARTITION_COUNT; part_id < PARTITION_COUNT;
-         part_id += partition_stride) {
+    if (partition_stride > full_grid_width) partition_stride = full_grid_width;
+    for (int part_id = (blockIdx.x + stream_idx * gridDim.x) % PARTITION_COUNT;
+         part_id < PARTITION_COUNT; part_id += partition_stride) {
         if (threadIdx.x == 0) bucket_aquired = false;
         __syncthreads();
         if (warp_leader) {
@@ -282,7 +277,7 @@ __global__ void kernel_partitions_into_sm_array(
         }
         __syncthreads();
         if (!bucket_aquired) continue;
-        for (int i = threadIdx.x; i < PTSM_PARTITION_GROUP_COUNT;
+        for (int i = threadIdx.x; i < PTSM_PER_PARTITION_GROUP_COUNT;
              i += blockDim.x) {
             shared_mem_array[i] = 0;
             shared_mem_array_occurance[i] = false;
@@ -291,18 +286,18 @@ __global__ void kernel_partitions_into_sm_array(
         while (true) {
             bucket_entry* be = warp_buckets[warp_id];
             if (!be) break;
-            //+1 since the first element is the head
             assert(be->head.element_count <= PTSM_BUCKET_CAP);
             /*   printf(
-                   "%i %i %i: err: partid %i, bucket %llx has cap %llu\n",
+                "%i %i %i: err: partid %i, bucket %llx has cap %llu\n",
                    threadIdx.x, blockIdx.x, stream_idx, part_id, be,
                    be->head.element_count);
-            */
+                   */
+            //+1 since the first element is the head
             for (int i = warp_offset + 1; i < be->head.element_count;
                  i += CUDA_WARP_SIZE) {
                 uint64_t group = be[i].value.group & PARITION_MASK;
-                assert(
-                    be[i].value.group >> PTSM_PARTITION_GROUP_BITS == part_id);
+                // assert(be[i].value.group >> PTSM_PARTITION_GROUP_BITS ==
+                //   part_id);
                 /* printf(
                      "%i %i %i: err: slot %i in partid %i, bucket %llx: "
                      "%llu\n",
@@ -327,7 +322,8 @@ __global__ void kernel_partitions_into_sm_array(
                 }
                 /*if (be) {
                   printf(
-                       "%i %i %i: aquiring bucket %llx with partid %i, prev: "
+                       "%i %i %i: aquiring bucket %llx with partid %i, prev:
+                "
                        "%llx"
                        "\n",
                        threadIdx.x, blockIdx.x, stream_idx, be, part_id,
@@ -338,12 +334,12 @@ __global__ void kernel_partitions_into_sm_array(
             __syncwarp();
         }
         __syncthreads();
-        for (uint64_t i = threadIdx.x; i < PTSM_PARTITION_GROUP_COUNT;
+        for (uint64_t i = threadIdx.x; i < PTSM_PER_PARTITION_GROUP_COUNT;
              i += blockDim.x) {
             if (!shared_mem_array_occurance[i]) continue;
             global_array_insert<true>(
                 global_array, global_occurance_array,
-                ((uint64_t)part_id << PTSM_PARTITION_GROUP_BITS) + i,
+                ((uint64_t)part_id << PTSM_PER_PARTITION_GROUP_BITS) + i,
                 shared_mem_array[i]);
         }
     }
