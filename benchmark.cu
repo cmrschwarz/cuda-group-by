@@ -14,7 +14,7 @@
 // to disable pinning of the output buffer
 #define DONT_WANT_PINNED_MEM false
 // set to false to reduce data size for debugging
-#define BIG_DATA false
+#define BIG_DATA true
 // use small group values to ease debugging
 #define SMALL_GROUP_VALS true
 // enforce this assumption so we can use the insert_by family of approaches
@@ -33,30 +33,30 @@
 #    define USE_OPENMP false
 #endif
 
-#define ENABLE_APPROACH_HASHTABLE false
-#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE false
-#define ENABLE_APPROACH_PER_THREAD_HASHTABLE false
-#define ENABLE_APPROACH_WARP_CMP false
-#define ENABLE_APPROACH_BLOCK_CMP false
-#define ENABLE_APPROACH_CUB_RADIX_SORT false
-#define ENABLE_APPROACH_THROUGHPUT_TEST false
-#define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE false
+#define ENABLE_APPROACH_HASHTABLE true
+#define ENABLE_APPROACH_SHARED_MEM_HASHTABLE true
+#define ENABLE_APPROACH_PER_THREAD_HASHTABLE true
+#define ENABLE_APPROACH_WARP_CMP true
+#define ENABLE_APPROACH_BLOCK_CMP true
+#define ENABLE_APPROACH_CUB_RADIX_SORT true
+#define ENABLE_APPROACH_THROUGHPUT_TEST true
+#define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE true
 
-#define ENABLE_APPROACH_GLOBAL_ARRAY false
-#define ENABLE_APPROACH_SHARED_MEM_ARRAY false
-#define ENABLE_APPROACH_PER_THREAD_ARRAY false
+#define ENABLE_APPROACH_GLOBAL_ARRAY true
+#define ENABLE_APPROACH_SHARED_MEM_ARRAY true
+#define ENABLE_APPROACH_PER_THREAD_ARRAY true
 
 #define ENABLE_APPROACH_PARTITION_TO_SM true
 
-#define ENABLE_HASHTABLE_EAGER_OUT_IDX false
-#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT false
-#define ENABLE_BLOCK_CMP_OLD false
-#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE false
-#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC false
-#define ENABLE_SHARED_MEM_ARRAY_NON_OPTIMISTIC false
-#define ENABLE_SHARED_MEM_HASHTABLE_OPTIMISTIC false
-#define ENABLE_PER_THREAD_ARRAY_NON_BANK_OPTIMIZED false
-#define ENABLE_PER_THREAD_HASHTABLE_NON_BANK_OPTIMIZED false
+#define ENABLE_HASHTABLE_EAGER_OUT_IDX true
+#define ENABLE_BLOCK_CMP_NAIVE_WRITEOUT true
+#define ENABLE_BLOCK_CMP_OLD true
+#define ENABLE_GLOBAL_ARRAY_NON_COMPRESSTORE true
+#define ENABLE_GLOBAL_ARRAY_NON_OPTIMISTIC true
+#define ENABLE_SHARED_MEM_ARRAY_NON_OPTIMISTIC true
+#define ENABLE_SHARED_MEM_HASHTABLE_OPTIMISTIC true
+#define ENABLE_PER_THREAD_ARRAY_NON_BANK_OPTIMIZED true
+#define ENABLE_PER_THREAD_HASHTABLE_NON_BANK_OPTIMIZED true
 
 #if ENABLE_APPROACH_HASHTABLE
 #    include "group_by_hashtable.cuh"
@@ -113,7 +113,8 @@
 #endif
 #if BIG_DATA
 #    define BENCHMARK_STREAMS_MAX 8
-const size_t benchmark_stream_count_variants[] = {0, 4, BENCHMARK_STREAMS_MAX};
+const size_t benchmark_stream_count_variants[] = {0, 2, 4,
+                                                  BENCHMARK_STREAMS_MAX};
 #else
 #    define BENCHMARK_STREAMS_MAX 4
 const size_t benchmark_stream_count_variants[] = {0, 4};
@@ -1077,25 +1078,33 @@ int main()
                              "count; run index; validation; time in ms"
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
-    /*
-        run_benchmarks_for_group_bit_count<1>(&bench_data);
-        run_benchmarks_for_group_bit_count<2>(&bench_data);
-        run_benchmarks_for_group_bit_count<3>(&bench_data);
-        run_benchmarks_for_group_bit_count<4>(&bench_data);
-        run_benchmarks_for_group_bit_count<5>(&bench_data);
-        run_benchmarks_for_group_bit_count<9>(&bench_data);
-        run_benchmarks_for_group_bit_count<11>(&bench_data);
-    */
-    run_benchmarks_for_group_bit_count<13>(&bench_data);
 
+    run_benchmarks_for_group_bit_count<1>(&bench_data);
+    run_benchmarks_for_group_bit_count<2>(&bench_data);
+    run_benchmarks_for_group_bit_count<3>(&bench_data);
+    run_benchmarks_for_group_bit_count<4>(&bench_data);
+    run_benchmarks_for_group_bit_count<5>(&bench_data);
+    run_benchmarks_for_group_bit_count<6>(&bench_data);
+    run_benchmarks_for_group_bit_count<7>(&bench_data);
+    run_benchmarks_for_group_bit_count<8>(&bench_data);
+    run_benchmarks_for_group_bit_count<9>(&bench_data);
+    run_benchmarks_for_group_bit_count<10>(&bench_data);
+    run_benchmarks_for_group_bit_count<11>(&bench_data);
+    run_benchmarks_for_group_bit_count<12>(&bench_data);
+    run_benchmarks_for_group_bit_count<13>(&bench_data);
+    run_benchmarks_for_group_bit_count<14>(&bench_data);
     run_benchmarks_for_group_bit_count<15>(&bench_data);
+    run_benchmarks_for_group_bit_count<16>(&bench_data);
     run_benchmarks_for_group_bit_count<17>(&bench_data);
     run_benchmarks_for_group_bit_count<18>(&bench_data);
     run_benchmarks_for_group_bit_count<19>(&bench_data);
     run_benchmarks_for_group_bit_count<20>(&bench_data);
+    run_benchmarks_for_group_bit_count<21>(&bench_data);
     run_benchmarks_for_group_bit_count<22>(&bench_data);
     run_benchmarks_for_group_bit_count<23>(&bench_data);
-    run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
+    run_benchmarks_for_group_bit_count<24>(&bench_data);
+    run_benchmarks_for_group_bit_count<25>(&bench_data);
+    run_benchmarks_for_group_bit_count<26>(&bench_data);
 
     bench_data.output_csv.flush();
     bench_data.output_csv.~basic_ofstream();
