@@ -254,10 +254,7 @@ __global__ void kernel_partitions_into_sm_array(
     int warp_id = threadIdx.x / CUDA_WARP_SIZE;
     int warp_offset = threadIdx.x % CUDA_WARP_SIZE;
     bool warp_leader = warp_offset == 0;
-    int full_grid_width = gridDim.x * stream_count;
-    int partition_stride = PARTITION_COUNT / full_grid_width;
-    if (partition_stride == 0) partition_stride = 1;
-    if (partition_stride > full_grid_width) partition_stride = full_grid_width;
+    int partition_stride = gridDim.x * stream_count;
     for (int part_id = (blockIdx.x + stream_idx * gridDim.x) % PARTITION_COUNT;
          part_id < PARTITION_COUNT; part_id += partition_stride) {
         if (threadIdx.x == 0) bucket_aquired = false;
@@ -388,6 +385,7 @@ void group_by_partition_to_sm(
             <<<grid_dim, block_dim, 0, stream>>>(
                 gd->output, ptsm_bucket_heads, global_array,
                 global_array_occurance_flags, actual_stream_count, i);
+        if (stream_count > 1) cudaEventRecord(events[i], stream);
     }
     group_by_global_array_writeout<MAX_GROUP_BITS>(
         gd, grid_dim, block_dim, stream_count, streams, events, start_event,

@@ -1027,7 +1027,7 @@ def main():
     # remove all previous pngs from the output dir
     for f in os.listdir(output_path):
         if ("pad" + f)[-4:] == ".png":
-            os.remove(output_path + "/" + f)
+            # os.remove(output_path + "/" + f)
             pass
     
     #read in data
@@ -1068,9 +1068,11 @@ def main():
         lambda: throughput_over_group_size_barring_row_count_stacking_approaches(data_avg, False),
     ]
     slow_jobs = [
-        lambda: grid_dim_block_dim_heatmap(data_avg, "global_array_optimistic_compresstore", group_count=2048),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", False),
-        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", True)
+        lambda: grid_dim_block_dim_heatmap(data_avg, "warp_cmp", group_count=32),
+        lambda: elements_per_thread_over_group_count_heatmap(data_avg, "warp_cmp", False),
+        #lambda: grid_dim_block_dim_heatmap(data_avg, "global_array_optimistic_compresstore", group_count=2048),
+        #lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", False),
+        #lambda: elements_per_thread_over_group_count_heatmap(data_avg, "global_array_optimistic_compresstore", True)
     ]
     if(gen_all):
         #generate a failiure heatmap for all approaches containing failiures

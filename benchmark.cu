@@ -42,8 +42,8 @@
 #define ENABLE_APPROACH_THROUGHPUT_TEST false
 #define ENABLE_APPROACH_SHARED_MEM_PERFECT_HASHTABLE false
 
-#define ENABLE_APPROACH_GLOBAL_ARRAY true
-#define ENABLE_APPROACH_SHARED_MEM_ARRAY true
+#define ENABLE_APPROACH_GLOBAL_ARRAY false
+#define ENABLE_APPROACH_SHARED_MEM_ARRAY false
 #define ENABLE_APPROACH_PER_THREAD_ARRAY false
 
 #define ENABLE_APPROACH_PARTITION_TO_SM true
@@ -115,8 +115,8 @@
 #    define BENCHMARK_STREAMS_MAX 8
 const size_t benchmark_stream_count_variants[] = {0, 4, BENCHMARK_STREAMS_MAX};
 #else
-#    define BENCHMARK_STREAMS_MAX 0
-const size_t benchmark_stream_count_variants[] = {0};
+#    define BENCHMARK_STREAMS_MAX 4
+const size_t benchmark_stream_count_variants[] = {0, 4};
 #endif
 
 #if BIG_DATA
@@ -1077,16 +1077,17 @@ int main()
                              "count; run index; validation; time in ms"
                           << std::endl;
     bench_data.output_csv << std::fixed << std::setprecision(20);
-
-    run_benchmarks_for_group_bit_count<1>(&bench_data);
-    run_benchmarks_for_group_bit_count<2>(&bench_data);
-    run_benchmarks_for_group_bit_count<3>(&bench_data);
-    run_benchmarks_for_group_bit_count<4>(&bench_data);
-    run_benchmarks_for_group_bit_count<5>(&bench_data);
-    run_benchmarks_for_group_bit_count<9>(&bench_data);
-    run_benchmarks_for_group_bit_count<11>(&bench_data);
-
+    /*
+        run_benchmarks_for_group_bit_count<1>(&bench_data);
+        run_benchmarks_for_group_bit_count<2>(&bench_data);
+        run_benchmarks_for_group_bit_count<3>(&bench_data);
+        run_benchmarks_for_group_bit_count<4>(&bench_data);
+        run_benchmarks_for_group_bit_count<5>(&bench_data);
+        run_benchmarks_for_group_bit_count<9>(&bench_data);
+        run_benchmarks_for_group_bit_count<11>(&bench_data);
+    */
     run_benchmarks_for_group_bit_count<13>(&bench_data);
+
     run_benchmarks_for_group_bit_count<15>(&bench_data);
     run_benchmarks_for_group_bit_count<17>(&bench_data);
     run_benchmarks_for_group_bit_count<18>(&bench_data);
@@ -1094,7 +1095,6 @@ int main()
     run_benchmarks_for_group_bit_count<20>(&bench_data);
     run_benchmarks_for_group_bit_count<22>(&bench_data);
     run_benchmarks_for_group_bit_count<23>(&bench_data);
-
     run_benchmarks_for_group_bit_count<BENCHMARK_GROUP_BITS_MAX>(&bench_data);
 
     bench_data.output_csv.flush();
